@@ -229,3 +229,5 @@ infra/cdk.out/
 *.enc
 *.sha256
 apps/config_console/.streamlit/secrets.toml
+.dbeaver/
+.project
