@@ -18,6 +18,152 @@ main {
   text-align: center;
 }
 
+main.wide {
+  max-width: 56rem;
+  text-align: left;
+}
+
+.ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #334155;
+}
+
+.ribbon button,
+.page-card > button {
+  margin-top: 0;
+}
+
+.ribbon #logout {
+  margin-top: 0;
+  margin-left: auto;
+}
+
+.ribbon button[aria-current] {
+  background: #e2e8f0;
+}
+
+.page-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.page-card {
+  padding: 0.9rem 1rem;
+  border: 1px solid #334155;
+  border-radius: 0.75rem;
+}
+
+.page-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.page-card h2,
+.page-section h2,
+.page-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.page-section + .page-section {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #334155;
+}
+
+.pill {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+table.compact {
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.lede {
+  margin-top: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+th,
+td {
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid #334155;
+  vertical-align: middle;
+}
+
+td input,
+.add-form input,
+.add-form select,
+.edit-form input,
+.edit-form select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.35rem;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.row-actions {
+  white-space: nowrap;
+}
+
+.row-actions button,
+.add-form button,
+#logout {
+  margin-top: 0;
+  margin-right: 0.4rem;
+}
+
+.edit-form {
+  display: grid;
+  grid-template-columns: minmax(12rem, 18rem) minmax(12rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 720px) {
+  .edit-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+.edit-form label,
+.add-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.add-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+#logout {
+  margin-top: 1.5rem;
+}
+
 h1 {
   margin: 0 0 0.75rem;
 }

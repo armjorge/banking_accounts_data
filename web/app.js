@@ -147,6 +147,11 @@ async function main() {
 
   const claims = decodeJwt(tokens.id_token);
   const name = claims.email || claims["cognito:username"] || claims.sub;
+  if (window.isAdminClaim(claims)) {
+    window.renderMasterBanking(root, { name, logout });
+    return;
+  }
+  root.classList.remove("wide");
   render(
     root,
     `<h1>Welcome</h1><p>You are signed in as <strong>${name}</strong>.</p><p>User id (sub): ${claims.sub}</p><button id="logout">Sign out</button>`,

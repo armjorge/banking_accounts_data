@@ -8,6 +8,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from catalog import PROJECT
 
 CONTROL_PREFIX = "/strm_bank/control"
+ADMIN_GROUP = "admin"
 
 
 @dataclass
@@ -89,6 +90,32 @@ def load_prefix_params(prefix: str, region: str) -> dict[str, str]:
     except BotoCoreError as exc:
         raise RuntimeError(f"Unable to read SSM path {path}: {exc}") from exc
     return values
+
+
+def cognito_user_label(user: dict) -> str:
+    attributes = {item["Name"]: item["Value"] for item in user.get("Attributes", [])}
+    return attributes.get("email") or user.get("Username") or ""
+
+
+def list_admin_users(region: str, user_pool_id: str) -> list[str]:
+    """Emails currently in the Cognito group that can open the admin console."""
+    client = session(region).client("cognito-idp")
+    labels: list[str] = []
+    token: str | None = None
+    while True:
+        kwargs: dict = {
+            "UserPoolId": user_pool_id,
+            "GroupName": ADMIN_GROUP,
+            "Limit": 60,
+        }
+        if token:
+            kwargs["NextToken"] = token
+        page = client.list_users_in_group(**kwargs)
+        labels.extend(cognito_user_label(user) for user in page.get("Users", []))
+        token = page.get("NextToken")
+        if not token:
+            break
+    return sorted({label for label in labels if label})
 
 
 def list_tagged_resources(region: str, env_prefix: str) -> list[dict[str, str]]:
