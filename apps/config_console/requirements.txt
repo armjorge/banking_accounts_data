@@ -1,0 +1,6 @@
+# Installed via uv from the repository root (pyproject.toml).
+# Do not pip install this file from infra/.
+streamlit>=1.40.0
+boto3>=1.35.0
+botocore[crt]>=1.35.0
+psycopg[binary]>=3.2.0

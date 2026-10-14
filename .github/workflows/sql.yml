@@ -1,0 +1,34 @@
+name: sql
+
+on:
+  pull_request:
+    paths:
+      - "sql/**"
+      - ".sqlfluff"
+      - ".github/workflows/sql.yml"
+  push:
+    paths:
+      - "sql/**"
+      - ".sqlfluff"
+      - ".github/workflows/sql.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlfluff:
+    name: sqlfluff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install SQLFluff
+        run: pip install "sqlfluff==4.1.0"
+      - name: Lint sql
+        run: sqlfluff lint sql

@@ -1,0 +1,12 @@
+-- sqlfluff:exclude_rules: JJ01,LT02,CP02,CP03,CP05,RF04,RF06
+CREATE SCHEMA IF NOT EXISTS {{NEON_USERS_SCHEMA}};
+
+CREATE TABLE IF NOT EXISTS {{NEON_USERS_SCHEMA}}.users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cognito_sub TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS users_email_idx
+    ON {{NEON_USERS_SCHEMA}}.users (email);

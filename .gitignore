@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# CDK / Node
+node_modules/
+infra/cdk.out/
+*.js.map
+
+# Local secrets and encrypted config copies
+.local-config.yml
+*.enc
+*.sha256
+apps/config_console/.streamlit/secrets.toml

@@ -1,0 +1,13 @@
+{
+  "environment": "dev",
+  "values": {
+    "aws_region": "us-east-1",
+    "aws_object_prefix": "strm_bank_dev",
+    "neon_database_url": "postgresql://neondb_owner:PASSWORD@ep-example.neon.tech/neondb?sslmode=require",
+    "neon_user": "neondb_owner",
+    "neon_database": "neondb",
+    "neon_users_schema": "cognito_users",
+    "neon_db_schema": "core",
+    "snowflake_account": ""
+  }
+}

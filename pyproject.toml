@@ -1,0 +1,22 @@
+[project]
+name = "strm-bank"
+version = "0.1.0"
+description = "Streamlit control plane for banking accounts environments"
+requires-python = ">=3.12"
+dependencies = [
+  "streamlit>=1.40.0",
+  "boto3>=1.35.0",
+  "botocore[crt]>=1.35.0",
+  "psycopg[binary]>=3.2.0",
+  "watchdog>=6.0.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["apps/config_console"]
+testpaths = ["apps/config_console/tests"]

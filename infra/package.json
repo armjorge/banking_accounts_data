@@ -1,0 +1,36 @@
+{
+  "name": "banking-accounts-infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "banking-accounts-infra": "bin/app.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "watch": "tsc -w --noEmit",
+    "cdk": "cdk",
+    "synth": "cdk synth --strict",
+    "diff": "cdk diff",
+    "deploy:control": "cdk deploy StrmBank-Control --require-approval never",
+    "deploy:dev": "cdk deploy StrmBank-Control StrmBank-dev --context environment=dev --context prefix=strm_bank_dev --require-approval never",
+    "destroy:dev": "cdk destroy StrmBank-dev --context environment=dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.15.5",
+    "aws-cdk": "^2.1031.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.17.0",
+    "eslint-plugin-awscdk": "^0.0.8",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ssm": "^3.700.0",
+    "aws-cdk-lib": "^2.220.0",
+    "constructs": "^10.4.2",
+    "pg": "^8.16.3"
+  }
+}
