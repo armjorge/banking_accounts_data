@@ -5,13 +5,11 @@ on:
     paths:
       - "sql/**"
       - ".sqlfluff"
-      - "scripts/apply_public_ddl.py"
       - ".github/workflows/sql.yml"
   push:
     paths:
       - "sql/**"
       - ".sqlfluff"
-      - "scripts/apply_public_ddl.py"
       - ".github/workflows/sql.yml"
 
 permissions:
@@ -34,20 +32,3 @@ jobs:
         run: pip install "sqlfluff==4.1.0"
       - name: Lint sql
         run: sqlfluff lint sql
-
-  apply-ddl:
-    name: apply ddl
-    needs: sqlfluff
-    if: >-
-      startsWith(github.base_ref, 'releases/')
-      || startsWith(github.ref, 'refs/heads/releases/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - name: Install project
-        run: uv sync --frozen
-      - name: Apply neondb.public DDL
-        env:
-          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-        run: uv run python scripts/apply_public_ddl.py
