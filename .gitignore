@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -224,8 +224,13 @@ node_modules/
 infra/cdk.out/
 *.js.map
 
+# Local site settings (Cognito client id and API URL). Recreate from the README.
+web/config.js
+
 # Local secrets and encrypted config copies
 .local-config.yml
 *.enc
 *.sha256
 apps/config_console/.streamlit/secrets.toml
+.dbeaver/
+.project

@@ -142,12 +142,42 @@ The password is the segment between `:` and `@`. Paste the **full** URI (it is s
 
 New sign-ins upsert; they do not duplicate the row.
 
+## Run the signed-in page locally
+
+Use this to try `web/` before **Publish frontend only**. Cognito already allows `http://localhost:5173/` as a return address. Another port will be rejected.
+
+`web/config.js` is not in git. After a clone, create it again from the site that is already published:
+
+```bash
+curl -fsS "https://YOUR_DOMAIN.cloudfront.net/config.js" -o web/config.js
+```
+
+`YOUR_DOMAIN` is **Deployed outputs** → `web-domain`. Then change only these two lines in `web/config.js`. The trailing slash is required:
+
+```javascript
+redirectUri: "http://localhost:5173/",
+logoutUri: "http://localhost:5173/",
+```
+
+If the CloudFront site has never been published, copy `config/web.config.example.js` to `web/config.js` and fill `userPoolId`, `clientId`, `cognitoDomain`, and `apiUrl` from **Deployed outputs**.
+
+From the repository root, leave this running:
+
+```bash
+python3 -m http.server 5173 --directory web
+```
+
+Open http://localhost:5173/ and sign in with the same Cognito user as the CloudFront site. You are now reading the files in `web/`. Edit them, save, and refresh the browser. Publishing to S3 is only for the CloudFront URL.
+
+Sign-in and the page list work on localhost. Loading and saving banks, account types, and templates calls the admin API, which currently allows only the CloudFront origin. Those saves stay blocked until `http://localhost:5173` is added to that API’s allowed origins and the environment is deployed again.
+
 ## Recreating on a new laptop
 
 1. `aws login` and `aws sts get-caller-identity`
 2. Clone the repo, `uv sync`, `uv run streamlit run apps/config_console/app.py`
 3. Config is already in the control-plane S3 bucket. No `.env` to copy.
 4. Bootstrap CDK only if this account/region has never been bootstrapped.
+5. Recreate `web/config.js` with the steps in **Run the signed-in page locally**. That file is gitignored.
 
 ## Product tiers (later)
 
@@ -163,7 +193,7 @@ New sign-ins upsert; they do not duplicate the row.
 apps/config_console/   Streamlit operator UI
 infra/                 CDK (control + per-environment + login Lambda)
 sql/                   001–002 login DDL now; 003–004 app model later
-web/                   Cognito login + welcome page
+web/                   Cognito login page (local config.js is gitignored)
 scripts/cdk-bootstrap.sh
 config/                Example config (no real secrets)
 ```

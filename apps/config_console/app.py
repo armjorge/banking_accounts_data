@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from aws_env import (
     caller_identity,
     control_config_bucket,
+    list_admin_users,
     list_tagged_resources,
     load_prefix_params,
 )
@@ -337,9 +338,30 @@ with db_cols[1]:
 
 st.subheader("7. Login site")
 st.write(
-    "One step: create `cognito_users.users` if missing, then publish the Cognito "
-    "sign-in and welcome page. App tables and per-user views are the next slice."
+    "Publish replaces the files in this environment's website bucket and refreshes CloudFront. "
+    "Signed-in users land on the welcome page."
 )
+st.info(
+    "To access the admin console, the email must be part of the Cognito group `admin`. "
+    "Add or remove people in the Cognito user pool, then sign in again."
+)
+pool_id = infra.get("user-pool-id")
+if pool_id:
+    try:
+        admin_emails = list_admin_users(region, pool_id)
+    except Exception as exc:  # noqa: BLE001
+        admin_emails = None
+        st.warning(str(exc))
+    if admin_emails:
+        st.dataframe(
+            {"email": admin_emails},
+            hide_index=True,
+            alt="Emails in the Cognito admin group",
+        )
+    elif admin_emails == []:
+        st.caption("The admin group has no users yet.")
+else:
+    st.caption("Deploy this environment to see the admin group.")
 ready = bool(url and infra.get("website-bucket") and infra.get("user-pool-client-id"))
 boot_col, pub_col = st.columns(2)
 with boot_col:

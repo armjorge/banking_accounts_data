@@ -1,3 +1,4 @@
+from aws_env import cognito_user_label
 from site_publish import cognito_hosted_domain
 from catalog import (
     compose_database_url,
@@ -61,6 +62,16 @@ def test_sql_placeholders():
         database="neondb",
     )
     assert rendered == "cognito_users.users core.tx -- neondb"
+
+
+def test_cognito_user_label_prefers_email():
+    assert cognito_user_label(
+        {
+            "Username": "a4f88428-5091-7001-93d5-58919eec044f",
+            "Attributes": [{"Name": "email", "Value": "armjorge@gmail.com"}],
+        }
+    ) == "armjorge@gmail.com"
+    assert cognito_user_label({"Username": "only-name", "Attributes": []}) == "only-name"
 
 
 def test_cognito_domain():

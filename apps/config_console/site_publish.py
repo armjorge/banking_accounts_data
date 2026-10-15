@@ -31,6 +31,7 @@ def build_site_config(outputs: dict[str, str]) -> dict[str, str]:
         "logoutUri": f"{origin}/",
         "websiteBucket": outputs["website-bucket"],
         "webUrl": origin,
+        "apiUrl": outputs.get("api-url", ""),
     }
 
 
