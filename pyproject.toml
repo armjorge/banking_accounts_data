@@ -18,5 +18,5 @@ dev = ["pytest>=8.0"]
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["apps/config_console"]
-testpaths = ["apps/config_console/tests"]
+pythonpath = ["apps/config_console", "apps"]
+testpaths = ["apps/config_console/tests", "apps/statements/tests"]

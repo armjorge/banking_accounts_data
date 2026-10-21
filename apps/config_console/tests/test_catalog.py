@@ -52,6 +52,8 @@ def test_parse_neon_uri():
     cleaned = connectable_url(raw)
     assert "sslmode=require" in cleaned
     assert "channel_binding" not in cleaned
+    local = connectable_url("postgresql:///strm_test?sslmode=disable")
+    assert local == "postgresql:///strm_test?sslmode=disable"
 
 
 def test_sql_placeholders():

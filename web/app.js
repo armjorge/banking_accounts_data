@@ -151,12 +151,7 @@ async function main() {
     window.renderMasterBanking(root, { name, logout });
     return;
   }
-  root.classList.remove("wide");
-  render(
-    root,
-    `<h1>Welcome</h1><p>You are signed in as <strong>${name}</strong>.</p><p>User id (sub): ${claims.sub}</p><button id="logout">Sign out</button>`,
-  );
-  document.getElementById("logout").addEventListener("click", logout);
+  window.renderStatements(root, { name, logout, embedded: false });
 }
 
 main();

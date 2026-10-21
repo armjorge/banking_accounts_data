@@ -2,13 +2,24 @@
 -- cognito_users.users already exists (user_id UUID) and is not changed.
 --
 -- Re-running this file drops and recreates only the tables below.
--- A database that already has rows should run 005_admin_identity.sql instead.
+-- A database that already has rows should run 005_admin_identity.sql instead,
+-- then 006_statement_flow.sql. Do not re-run this file once statements exist:
+-- the drops below remove uploaded CSVs.
 -- Admin dimensions: plans_d, account_types_d, banks_d, bank_templates_f.
 -- SaaS: tenants_d belongs to a plan. tenant_users ties a tenant to cognito_users.users.
 -- bank_accounts_d and cutoff_date_f are tagged with that user.
 -- bank_id, a_type_id, and tenant_id are part of the bank_accounts_d key,
 -- so each account belongs to one bank, one account type, and one tenant.
+-- Statement masters, uploads, and plan limits are added by 006_statement_flow.sql.
 
+DROP TABLE IF EXISTS public.movement_dimensions_d;
+DROP TABLE IF EXISTS public.open_credit_f;
+DROP TABLE IF EXISTS public.open_debit_f;
+DROP TABLE IF EXISTS public.credit_plan_closed_f;
+DROP TABLE IF EXISTS public.msi_closed_f;
+DROP TABLE IF EXISTS public.master_credit_closed_f;
+DROP TABLE IF EXISTS public.master_debit_closed_f;
+DROP TABLE IF EXISTS public.statement_uploads_f;
 DROP TABLE IF EXISTS public.cutoff_date_f;
 DROP TABLE IF EXISTS public.bank_accounts_d;
 DROP TABLE IF EXISTS public.bank_templates_f;
@@ -119,9 +130,9 @@ CREATE TABLE public.bank_accounts_d (
 CREATE UNIQUE INDEX bank_accounts_d_account_id_idx
 ON public.bank_accounts_d (account_id);
 
--- Credit cutoff_date uses bank_accounts_d.account_cutoff_day.
+-- Credit cutoff_date is the user cutoff day in that month.
 -- Debit cutoff_date is the last day of cutoff_year / cutoff_month.
--- is_required is true from the current month forward.
+-- 006 stores period_start and period_end and fills the open periods.
 CREATE TABLE public.cutoff_date_f (
     cutoff_id INTEGER NOT NULL,
     account_id INTEGER NOT NULL,
