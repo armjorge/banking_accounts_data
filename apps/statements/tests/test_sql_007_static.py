@@ -33,6 +33,8 @@ def test_sql_007_seeds_banks():
     assert "HSBC" in content
     assert "BBVA" in content
     assert "banks_d" in content
+    assert "setval" in content.lower()
+    assert "pg_get_serial_sequence('public.banks_d', 'bank_id')" in content
 
 
 def test_sql_007_creates_registry_table():

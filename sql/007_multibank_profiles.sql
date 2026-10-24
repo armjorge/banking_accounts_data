@@ -2,7 +2,13 @@
 -- Multi-bank profile registry and statement ingestion on top of 006_statement_flow.sql.
 -- Safe to run more than once. Does not drop bank accounts or uploaded rows.
 
--- 1. Ensure HSBC and BBVA exist in banks catalog
+-- 1. Align banks sequence and ensure HSBC and BBVA exist in banks catalog
+SELECT setval(
+    pg_get_serial_sequence('public.banks_d', 'bank_id'),
+    COALESCE((SELECT MAX(bank_id) FROM public.banks_d), 1),
+    (SELECT EXISTS (SELECT 1 FROM public.banks_d))
+);
+
 INSERT INTO public.banks_d (bank_name)
 SELECT seed.bank_name
 FROM (VALUES ('HSBC'), ('BBVA')) AS seed (bank_name)
