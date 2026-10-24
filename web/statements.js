@@ -37,12 +37,27 @@ async function statementApi(path, options = {}) {
 async function decodeBankCsv(file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let text;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    text = new TextDecoder("windows-1252").decode(bytes);
+  let encoding;
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    encoding = "utf-8";
+    text = new TextDecoder("utf-8").decode(bytes.subarray(3));
+  } else if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    encoding = "utf-16le";
+    text = new TextDecoder("utf-16le").decode(bytes.subarray(2));
+  } else if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    encoding = "utf-16be";
+    text = new TextDecoder("utf-16be").decode(bytes.subarray(2));
+  } else {
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      encoding = "utf-8";
+    } catch {
+      text = new TextDecoder("windows-1252").decode(bytes);
+      encoding = "windows-1252";
+    }
   }
-  return text.replaceAll("\u00a0", " ").replace(/^\uFEFF/, "");
+  const cleaned = text.replaceAll("\u00a0", " ").replace(/^\uFEFF/, "");
+  return { text: cleaned, encoding };
 }
 
 function bytesToBase64(bytes) {
@@ -196,7 +211,7 @@ function renderStatements(root, session) {
 
   function addForm() {
     if (!home.banks.length || !home.account_types.length) {
-      return `<p>Banorte is not available yet. Apply the banking DDL from the config console.</p>`;
+      return `<p>No banks are available yet. Apply the banking DDL from the config console.</p>`;
     }
     const banks = home.banks
       .map(
@@ -236,7 +251,7 @@ function renderStatements(root, session) {
       : "";
     const accounts = home.accounts.length
       ? home.accounts.map(accountCard).join("")
-      : `<p>No accounts yet. Open a Banorte account and the periods whose cutoff has passed appear here, plus the two before that.</p>`;
+      : `<p>No accounts yet. Open a bank account and the periods whose cutoff has passed appear here, plus the two before that.</p>`;
     mount.innerHTML = `
       <p class="lede">${escapeStatementHtml(planLine())} Signed in as <strong>${escapeStatementHtml(session.name)}</strong>.</p>
       ${backup}
@@ -339,10 +354,21 @@ function renderStatements(root, session) {
       if (dataset.slot === "pdf") {
         body.pdf_base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
       } else {
-        body.csv = await decodeBankCsv(file);
+        const decoded = await decodeBankCsv(file);
+        body.csv = decoded.text;
+        body.encoding = decoded.encoding;
+        const firstLine = decoded.text.split(/\r\n|\n|\r/)[0] || "";
+        const commas = (firstLine.match(/,/g) || []).length;
+        const semis = (firstLine.match(/;/g) || []).length;
+        const tabs = (firstLine.match(/\t/g) || []).length;
+        let delimiter = ",";
+        if (semis > commas && semis > tabs) delimiter = ";";
+        else if (tabs > commas && tabs > semis) delimiter = "\t";
+        body.delimiter = delimiter;
       }
       const result = await statementApi("/uploads", { method: "POST", body: JSON.stringify(body) });
-      setStatus(result.backup_warning || "File loaded.");
+      const profileMsg = result.profile ? ` (${result.profile})` : "";
+      setStatus(result.backup_warning || `File loaded.${profileMsg}`);
       await load();
     } catch (error) {
       setStatus(error.message, true);

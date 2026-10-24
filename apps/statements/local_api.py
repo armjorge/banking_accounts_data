@@ -170,7 +170,7 @@ class StatementHandler(BaseHTTPRequestHandler):
                 cur.execute(
                     """
                     SELECT public.ingest_statement_csv(
-                        %s, %s, %s, %s, %s, COALESCE(%s::date, CURRENT_DATE)
+                        %s, %s, %s, %s, %s, COALESCE(%s::date, CURRENT_DATE), %s, %s
                     )
                     """,
                     (
@@ -180,6 +180,8 @@ class StatementHandler(BaseHTTPRequestHandler):
                         body.get("filename"),
                         body.get("csv"),
                         body.get("as_of"),
+                        body.get("encoding"),
+                        body.get("delimiter"),
                     ),
                 )
             return 200, _json(cur.fetchone()[0])

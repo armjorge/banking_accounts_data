@@ -250,7 +250,11 @@ def apply_banking_ddl(
     applied.extend(
         _apply_files(
             url,
-            ("001_extensions.sql", "006_statement_flow.sql"),
+            (
+                "001_extensions.sql",
+                "006_statement_flow.sql",
+                "007_multibank_profiles.sql",
+            ),
             users_schema=users_schema,
             database=database,
             app_schema=app_schema,

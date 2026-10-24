@@ -253,6 +253,8 @@ async function dispatch(
     const asOf = asDate(body.as_of);
     const pdfBase64 = typeof body.pdf_base64 === "string" ? body.pdf_base64 : "";
     const csv = typeof body.csv === "string" ? body.csv : "";
+    const encoding = typeof body.encoding === "string" ? body.encoding : null;
+    const delimiter = typeof body.delimiter === "string" ? body.delimiter : null;
     if (slot === "pdf") {
       if (!pdfBase64 || pdfBase64.length > 3_000_000) {
         return json(400, { error: "The PDF is empty or larger than 2 MB" });
@@ -268,8 +270,8 @@ async function dispatch(
               [body.account_id, body.cutoff_id, filename, pdfBase64, asOf],
             )
           : await client.query(
-              `SELECT public.ingest_statement_csv($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE))`,
-              [body.account_id, body.cutoff_id, slot, filename, csv, asOf],
+              `SELECT public.ingest_statement_csv($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, $8)`,
+              [body.account_id, body.cutoff_id, slot, filename, csv, asOf, encoding, delimiter],
             );
       const row = result.rows[0] as { ingest_statement_csv?: UploadPayload; ingest_period_pdf?: UploadPayload } | undefined;
       return row?.ingest_statement_csv ?? row?.ingest_period_pdf;

@@ -10,6 +10,12 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 
+from statements.profiles import (
+    decode_bytes as _decode_bytes,
+    normalize_header as _normalize_header,
+)
+
+
 def concept_sk(concept: str) -> str:
     """Digits from the trimmed concept, or letters when the concept has no digit."""
     trimmed = concept.replace("\u00a0", " ").replace("\ufeff", "").strip()
@@ -23,19 +29,14 @@ def concept_hash_key(concept: str) -> str:
 
 
 def normalize_header(header: str) -> str:
-    text = header.replace("\u00a0", " ").replace("\ufeff", "").strip().lower()
-    folded = unicodedata.normalize("NFD", text)
-    without_marks = "".join(char for char in folded if unicodedata.category(char) != "Mn")
-    return re.sub(r"\s+", " ", without_marks)
+    res = _normalize_header(header)
+    return res if isinstance(res, str) else " ".join(res)
 
 
 def decode_bank_csv(payload: bytes) -> str:
-    """UTF-8 when the bytes are valid, otherwise Windows-1252. Fold non-breaking spaces."""
-    try:
-        text = payload.decode("utf-8")
-    except UnicodeDecodeError:
-        text = payload.decode("cp1252")
-    return text.replace("\u00a0", " ").lstrip("\ufeff")
+    """UTF-8 / BOM / Windows-1252. Fold non-breaking spaces."""
+    text, _ = _decode_bytes(payload)
+    return text
 
 
 def movement_row_hash(

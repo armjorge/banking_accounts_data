@@ -213,6 +213,29 @@ Closed masters are append-only. `open_debit_f` and `open_credit_f` are replaced 
 
 The loader lowercases headers, strips accents, and accepts either line ending. The browser tries UTF-8 and falls back to Windows-1252, then folds non-breaking spaces to spaces. The lineage concepts end in a non-breaking space; these three samples do not.
 
+### Supported banks and statement profiles
+
+Statement ingestion maps bank-specific CSV exports into a common canonical schema:
+
+| Profile code | Bank | Dataset | Header / Shape | Amount convention | Encoding |
+| --- | --- | --- | --- | --- | --- |
+| `banorte_debit_v1` | Banorte | debit | `Fecha, Concepto, Cargos, Abonos, Saldos` | Cargos negative, Abonos positive, Saldos balance | UTF-8 / Windows-1252 |
+| `banorte_credit_monthly_v1` | Banorte | credit_monthly | `Fecha, Concepto, Abono, Cargo, Tarjeta` | Both positive (mapped to cargos = -cargo, abonos = abono) | UTF-8 |
+| `banorte_credit_plan_v1` | Banorte | credit_plan | `Fecha de operación, Tasa anual, Importe inicial, Importe pendiente, Concepto, Pagos pendientes, Mensualidad` | Mensualidad positive, parses "03/12" into pagos_hechos/pagos_totales | Windows-1252 |
+| `hsbc_debit_v1` | HSBC | debit | Headerless, 3 columns (`date, description, signed amount`) | Signed amount (e.g. `"-21,878.96"`), quoted thousands comma, Saldos NULL | UTF-8 |
+| `bbva_*` | BBVA | debit / credit | BBVA-ready (add registry row when sample arrives) | TBD | TBD |
+
+#### How to add a bank or profile
+
+1. Insert a row into `public.file_profiles_d` (and mirror in `PROFILES` in `apps/statements/profiles.py`):
+   - Set `profile_code`, `bank_name`, `dataset` (`debit`, `credit_monthly`, `credit_plan`).
+   - If the file has headers: set `has_header = TRUE`, `header_signature = ARRAY['sorted', 'normalized', 'headers']`.
+   - If headerless: set `has_header = FALSE`, `header_signature = NULL`, and `column_count`.
+   - Specify `amount_rule` (`split_signed`, `split_positive_credit`, `single_signed`, `installment`).
+2. Add a synthetic, anonymized test fixture in `apps/statements/tests/fixtures/`.
+3. Add a test in `apps/statements/tests/test_profiles.py`.
+4. Ensure the bank exists in `public.banks_d`. No code change is required unless a new amount rule is needed.
+
 ### Apply it from the config console
 
 From the repository root, with the Neon URL saved:
