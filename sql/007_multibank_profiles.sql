@@ -156,6 +156,9 @@ ADD COLUMN IF NOT EXISTS encoding TEXT;
 ALTER TABLE public.statement_uploads_f
 ADD COLUMN IF NOT EXISTS delimiter TEXT;
 
+ALTER TABLE public.statement_uploads_f
+ADD COLUMN IF NOT EXISTS source_profile TEXT;
+
 -- 5. Profile detection functions
 CREATE OR REPLACE FUNCTION public.detect_profile(
     p_bank_name TEXT,
@@ -926,7 +929,8 @@ BEGIN
         storage_mode,
         body_text,
         encoding,
-        delimiter
+        delimiter,
+        source_profile
     )
     VALUES (
         v_upload_id,
@@ -942,7 +946,8 @@ BEGIN
         'database',
         v_csv,
         COALESCE(p_encoding, 'utf-8'),
-        v_delim
+        v_delim,
+        v_profile
     );
 
     IF v_dataset = 'debit' THEN
@@ -1262,105 +1267,136 @@ AS $fn$
 DECLARE
     v_tenant UUID;
     v_user UUID;
-    v_today DATE := COALESCE(p_as_of, CURRENT_DATE);
-    v_accounts JSONB;
+    v_accounts JSONB := '[]'::JSONB;
+    v_account RECORD;
+    v_periods JSONB;
     v_home JSONB;
 BEGIN
     SELECT session_row.tenant_id, session_row.user_id
     INTO v_tenant, v_user
     FROM public.require_session() AS session_row;
 
-    SELECT COALESCE(
-        JSONB_AGG(
-            JSONB_BUILD_OBJECT(
-                'account_id', account.account_id,
-                'account_name', account.account_name,
-                'account_number', account.account_number,
-                'bank_id', account.bank_id,
-                'bank_name', bank.bank_name,
-                'a_type_id', account.a_type_id,
-                'type_name', kind.type_name,
-                'ledger_kind', kind.ledger_kind,
-                'allows_cutoff', kind.allows_cutoff,
-                'account_cutoff_day', account.account_cutoff_day,
-                'credit_days', account.credit_days,
-                'periods', (
-                    SELECT COALESCE(
-                        JSONB_AGG(
-                            JSONB_BUILD_OBJECT(
-                                'cutoff_id', cutoff.cutoff_id,
-                                'period_label', cutoff.period_label,
-                                'period_start', cutoff.period_start,
-                                'period_end', cutoff.period_end,
-                                'payment_due', cutoff.payment_due,
-                                'is_closed', cutoff.is_closed,
-                                'is_open_for_upload', (v_today > cutoff.period_end),
-                                'uploads', (
-                                    SELECT COALESCE(
-                                        JSONB_AGG(
-                                            JSONB_BUILD_OBJECT(
-                                                'upload_id', upload.upload_id,
-                                                'dataset', upload.dataset,
-                                                'original_filename', upload.original_filename,
-                                                'row_count', upload.row_count,
-                                                'byte_size', upload.byte_size,
-                                                'uploaded_at', upload.uploaded_at,
-                                                'source_profile', (
-                                                    CASE
-                                                        WHEN upload.dataset = 'debit' THEN (
-                                                            SELECT m.source_profile
-                                                            FROM public.master_debit_closed_f AS m
-                                                            WHERE m.file_id = upload.upload_id
-                                                            LIMIT 1
-                                                        )
-                                                        WHEN upload.dataset = 'credit_monthly' THEN (
-                                                            SELECT m.source_profile
-                                                            FROM public.master_credit_closed_f AS m
-                                                            WHERE m.file_id = upload.upload_id
-                                                            LIMIT 1
-                                                        )
-                                                        ELSE (
-                                                            SELECT m.source_profile
-                                                            FROM public.credit_plan_closed_f AS m
-                                                            WHERE m.file_id = upload.upload_id
-                                                            LIMIT 1
-                                                        )
-                                                    END
-                                                )
-                                            )
-                                            ORDER BY upload.uploaded_at DESC
-                                        ),
-                                        '[]'::JSONB
-                                    )
-                                    FROM public.statement_uploads_f AS upload
-                                    WHERE upload.cutoff_id = cutoff.cutoff_id
-                                )
-                            )
-                            ORDER BY cutoff.period_end DESC
-                        ),
-                        '[]'::JSONB
+    FOR v_account IN
+        SELECT
+            account.account_id,
+            account.account_name,
+            account.account_number,
+            account.account_cutoff_day,
+            account.credit_days,
+            bank.bank_name,
+            kind.type_name,
+            kind.ledger_kind,
+            kind.allows_cutoff
+        FROM public.bank_accounts_d AS account
+        INNER JOIN public.banks_d AS bank ON bank.bank_id = account.bank_id
+        INNER JOIN public.account_types_d AS kind ON kind.a_type_id = account.a_type_id
+        WHERE
+            account.tenant_id = v_tenant
+            AND account.user_id = v_user
+        ORDER BY account.account_number
+    LOOP
+        PERFORM public.refresh_statement_periods(v_account.account_id, p_as_of);
+        SELECT COALESCE(JSONB_AGG(period.payload ORDER BY period.period_end), '[]'::JSONB)
+        INTO v_periods
+        FROM (
+            SELECT
+                cutoff.period_end,
+                JSONB_BUILD_OBJECT(
+                    'cutoff_id', cutoff.cutoff_id,
+                    'period_start', cutoff.period_start,
+                    'period_end', cutoff.period_end,
+                    'period_label', TO_CHAR(cutoff.period_end, 'YYYY-MM'),
+                    'payment_due', CASE
+                        WHEN v_account.allows_cutoff THEN cutoff.period_end + v_account.credit_days
+                        ELSE NULL
+                    END,
+                    'in_window', EXISTS (
+                        SELECT 1
+                        FROM public.catcher_periods(
+                            v_account.allows_cutoff,
+                            v_account.account_cutoff_day,
+                            p_as_of
+                        ) AS window_period
+                        WHERE window_period.period_end = cutoff.period_end
+                    ),
+                    'pending', statement_file.upload_id IS NULL,
+                    'statement_upload_id', statement_file.upload_id,
+                    'statement_filename', statement_file.original_filename,
+                    'statement_row_count', statement_file.row_count,
+                    'statement_source_profile', statement_file.source_profile,
+                    'installment_upload_id', installment_file.upload_id,
+                    'installment_filename', installment_file.original_filename,
+                    'installment_row_count', installment_file.row_count,
+                    'installment_source_profile', installment_file.source_profile,
+                    'pdf_upload_id', pdf_file.upload_id,
+                    'pdf_filename', pdf_file.original_filename,
+                    'show_statement_slot',
+                    statement_file.upload_id IS NULL AND p_as_of > cutoff.period_end,
+                    'show_installment_slot',
+                    v_account.allows_cutoff
+                    AND installment_file.upload_id IS NULL
+                    AND p_as_of > cutoff.period_end,
+                    'show_pdf_slot',
+                    plan.curated_csv_backup
+                    AND pdf_file.upload_id IS NULL
+                    AND p_as_of > cutoff.period_end,
+                    'removable',
+                    p_as_of > cutoff.period_end
+                    AND statement_file.upload_id IS NULL
+                    AND installment_file.upload_id IS NULL
+                    AND pdf_file.upload_id IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM public.catcher_periods(
+                            v_account.allows_cutoff,
+                            v_account.account_cutoff_day,
+                            p_as_of
+                        ) AS window_period
+                        WHERE window_period.period_end = cutoff.period_end
                     )
-                    FROM public.cutoff_date_f AS cutoff
-                    WHERE cutoff.account_id = account.account_id
-                )
-            )
-            ORDER BY account.created_at
-        ),
-        '[]'::JSONB
-    )
-    INTO v_accounts
-    FROM public.bank_accounts_d AS account
-    INNER JOIN public.account_types_d AS kind ON kind.a_type_id = account.a_type_id
-    INNER JOIN public.banks_d AS bank ON bank.bank_id = account.bank_id
-    WHERE account.tenant_id = v_tenant AND account.user_id = v_user;
+                ) AS payload
+            FROM public.cutoff_date_f AS cutoff
+            INNER JOIN public.tenants_d AS tenant ON tenant.tenant_id = cutoff.tenant_id
+            INNER JOIN public.plans_d AS plan ON plan.plan_code = tenant.plan_code
+            LEFT JOIN public.statement_uploads_f AS statement_file
+                ON statement_file.cutoff_id = cutoff.cutoff_id
+                AND statement_file.dataset = CASE
+                    WHEN v_account.ledger_kind = 'credit' THEN 'credit_monthly'
+                    ELSE 'debit'
+                END
+            LEFT JOIN public.statement_uploads_f AS installment_file
+                ON installment_file.cutoff_id = cutoff.cutoff_id
+                AND installment_file.dataset = 'credit_plan'
+            LEFT JOIN public.statement_uploads_f AS pdf_file
+                ON pdf_file.cutoff_id = cutoff.cutoff_id
+                AND pdf_file.dataset = 'pdf'
+            WHERE
+                cutoff.account_id = v_account.account_id
+                AND cutoff.user_id = v_user
+        ) AS period;
+
+        v_accounts := v_accounts || JSONB_BUILD_ARRAY(JSONB_BUILD_OBJECT(
+            'account_id', v_account.account_id,
+            'account_name', v_account.account_name,
+            'account_number', v_account.account_number,
+            'account_cutoff_day', v_account.account_cutoff_day,
+            'credit_days', v_account.credit_days,
+            'bank_name', v_account.bank_name,
+            'type_name', v_account.type_name,
+            'ledger_kind', v_account.ledger_kind,
+            'allows_cutoff', v_account.allows_cutoff,
+            'periods', v_periods
+        ));
+    END LOOP;
 
     SELECT JSONB_BUILD_OBJECT(
+        'as_of', p_as_of,
         'plan_code', plan.plan_code,
-        'display_name', plan.display_name,
-        'curated_csv_backup', plan.curated_csv_backup,
+        'plan_name', plan.display_name,
         'max_credit_accounts', plan.max_credit_accounts,
         'max_debit_accounts', plan.max_debit_accounts,
         'max_total_accounts', plan.max_total_accounts,
+        'curated_csv_backup', plan.curated_csv_backup,
         'banks', (
             SELECT COALESCE(
                 JSONB_AGG(
@@ -1398,7 +1434,6 @@ BEGIN
     FROM public.tenants_d AS tenant
     INNER JOIN public.plans_d AS plan ON plan.plan_code = tenant.plan_code
     WHERE tenant.tenant_id = v_tenant;
-
     RETURN v_home;
 END
 $fn$;
