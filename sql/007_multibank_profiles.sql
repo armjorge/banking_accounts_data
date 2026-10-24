@@ -510,6 +510,7 @@ DECLARE
     v_filename TEXT := LEFT(BTRIM(COALESCE(p_filename, '')), 200);
     v_csv TEXT;
     v_first_row TEXT [];
+    v_parsed_rows TEXT [] := ARRAY[]::TEXT [];
     v_first_line TEXT;
     v_index JSONB := '{}'::JSONB;
     v_position INTEGER;
@@ -781,8 +782,8 @@ BEGIN
             RAISE EXCEPTION 'Unknown amount rule %', v_amount_rule USING ERRCODE = '22P02';
         END IF;
 
-        v_first_row := ARRAY_APPEND(
-            v_first_row,
+        v_parsed_rows := ARRAY_APPEND(
+            v_parsed_rows,
             JSONB_BUILD_OBJECT(
                 'record_no', v_record.record_no,
                 'txn_date', v_date,
@@ -806,8 +807,8 @@ BEGIN
         );
     END LOOP;
 
-    -- Note: v_first_row was reused as row collector after detection
-    v_rows := CARDINALITY(v_first_row);
+    -- Parsed JSON rows are collected separately from the detection row
+    v_rows := CARDINALITY(v_parsed_rows);
     IF v_rows = 0 THEN
         RAISE EXCEPTION 'The CSV has no movements' USING ERRCODE = '22P02';
     END IF;
@@ -820,7 +821,7 @@ BEGIN
                     (elem::JSONB ->> 'txn_date')::DATE AS txn_date,
                     (elem::JSONB ->> 'concept_sk') AS concept_sk,
                     (elem::JSONB ->> 'amount')::NUMERIC(18, 2) AS amount
-                FROM UNNEST(v_first_row) AS elem
+                FROM UNNEST(v_parsed_rows) AS elem
             ),
             caught AS (
                 SELECT
@@ -853,7 +854,7 @@ BEGIN
                     (elem::JSONB ->> 'txn_date')::DATE AS txn_date,
                     (elem::JSONB ->> 'concept_sk') AS concept_sk,
                     (elem::JSONB ->> 'amount')::NUMERIC(18, 2) AS amount
-                FROM UNNEST(v_first_row) AS elem
+                FROM UNNEST(v_parsed_rows) AS elem
             ),
             caught AS (
                 SELECT
@@ -886,7 +887,7 @@ BEGIN
                     (elem::JSONB ->> 'txn_date')::DATE AS txn_date,
                     (elem::JSONB ->> 'concept_sk') AS concept_sk,
                     (elem::JSONB ->> 'amount')::NUMERIC(18, 2) AS amount
-                FROM UNNEST(v_first_row) AS elem
+                FROM UNNEST(v_parsed_rows) AS elem
             ),
             caught AS (
                 SELECT
@@ -961,7 +962,7 @@ BEGIN
                 (elem::JSONB ->> 'abonos')::NUMERIC(18, 2) AS abonos,
                 (elem::JSONB ->> 'saldos')::NUMERIC(18, 2) AS saldos,
                 (elem::JSONB ->> 'amount')::NUMERIC(18, 2) AS amount
-            FROM UNNEST(v_first_row) AS elem
+            FROM UNNEST(v_parsed_rows) AS elem
         ),
         caught AS (
             SELECT
@@ -1042,7 +1043,7 @@ BEGIN
                 (elem::JSONB ->> 'cargo')::NUMERIC(18, 2) AS cargo,
                 (elem::JSONB ->> 'tarjeta') AS tarjeta,
                 (elem::JSONB ->> 'amount')::NUMERIC(18, 2) AS amount
-            FROM UNNEST(v_first_row) AS elem
+            FROM UNNEST(v_parsed_rows) AS elem
         ),
         caught AS (
             SELECT
@@ -1127,7 +1128,7 @@ BEGIN
                 (elem::JSONB ->> 'pagos_totales')::INTEGER AS pagos_totales,
                 (elem::JSONB ->> 'mensualidad')::NUMERIC(18, 2) AS mensualidad,
                 (elem::JSONB ->> 'amount')::NUMERIC(18, 2) AS amount
-            FROM UNNEST(v_first_row) AS elem
+            FROM UNNEST(v_parsed_rows) AS elem
         ),
         caught AS (
             SELECT
@@ -1217,7 +1218,7 @@ BEGIN
             (elem::JSONB ->> 'txn_date')::DATE AS txn_date,
             (elem::JSONB ->> 'concept_sk') AS concept_sk,
             (elem::JSONB ->> 'amount')::NUMERIC(18, 2) AS amount
-        FROM UNNEST(v_first_row) AS elem
+        FROM UNNEST(v_parsed_rows) AS elem
     ),
     caught AS (
         SELECT

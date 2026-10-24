@@ -298,3 +298,12 @@ def test_sql_007_no_undefined_columns_referenced():
                     errors.append(f"Undefined column '{col}' in INSERT INTO public.{table_name}")
 
     assert not errors, "Undefined column references detected:\n" + "\n".join(errors)
+
+
+def test_sql_007_detection_row_not_reused_as_collector():
+    import re
+    from pathlib import Path
+    sql = (Path(__file__).resolve().parents[3] / "sql" / "007_multibank_profiles.sql").read_text()
+    assert not re.search(r"ARRAY_APPEND\(\s*v_first_row", sql, re.I)
+    assert not re.search(r"UNNEST\(\s*v_first_row", sql, re.I)
+    assert "v_parsed_rows" in sql
