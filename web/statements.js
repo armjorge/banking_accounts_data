@@ -135,8 +135,8 @@ function renderStatements(root, session) {
       return fileLine(period.statement_filename, period.statement_upload_id, period.statement_row_count);
     }
     if (period.show_statement_slot) {
-      const label = account.ledger_kind === "credit" ? "Drop statement CSV" : "Drop CSV";
-      return dropZone(account, period, "statement", label, ".csv,text/csv");
+      const label = account.ledger_kind === "credit" ? "Drop statement CSV/XLSX" : "Drop CSV/XLSX";
+      return dropZone(account, period, "statement", label, ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }
     return `<span class="muted">Opens after ${escapeStatementHtml(period.period_end)}</span>`;
   }
@@ -354,10 +354,26 @@ function renderStatements(root, session) {
       if (dataset.slot === "pdf") {
         body.pdf_base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
       } else {
-        const decoded = await decodeBankCsv(file);
-        body.csv = decoded.text;
-        body.encoding = decoded.encoding;
-        const firstLine = decoded.text.split(/\r\n|\n|\r/)[0] || "";
+        const name = (file.name || "").toLowerCase();
+        const isXlsx =
+          name.endsWith(".xlsx") ||
+          name.endsWith(".xlsm") ||
+          file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        let text;
+        let encoding = "utf-8";
+        if (isXlsx) {
+          if (typeof strmXlsxToCsv !== "function") {
+            throw new Error("XLSX support is not loaded. Refresh the page and try again.");
+          }
+          text = await strmXlsxToCsv(await file.arrayBuffer());
+        } else {
+          const decoded = await decodeBankCsv(file);
+          text = decoded.text;
+          encoding = decoded.encoding;
+        }
+        body.csv = text;
+        body.encoding = encoding;
+        const firstLine = text.split(/\r\n|\n|\r/)[0] || "";
         const commas = (firstLine.match(/,/g) || []).length;
         const semis = (firstLine.match(/;/g) || []).length;
         const tabs = (firstLine.match(/\t/g) || []).length;

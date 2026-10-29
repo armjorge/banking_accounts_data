@@ -260,7 +260,7 @@ async function dispatch(
         return json(400, { error: "The PDF is empty or larger than 2 MB" });
       }
     } else if (!csv || csv.length > 2_000_000) {
-      return json(400, { error: "The CSV is empty or larger than 2 MB" });
+      return json(400, { error: "The statement file is empty or larger than 2 MB" });
     }
     const ingested = await withSession(claims, async (client) => {
       const result =
