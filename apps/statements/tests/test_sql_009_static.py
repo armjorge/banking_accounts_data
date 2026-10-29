@@ -16,7 +16,7 @@ def test_009_clears_statement_tables():
         "statement_uploads_f",
         "movement_dimensions_d",
     ):
-        assert f"TRUNCATE TABLE public.{table}" in SQL
+        assert f"public.{table}," in SQL or f"public.{table};" in SQL
 
 
 def test_009_keeps_accounts_and_banks():

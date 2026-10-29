@@ -6,14 +6,14 @@
 -- =============================================================================
 -- 1. Clear transformed statement data (source files live with the user / vault)
 -- =============================================================================
-TRUNCATE TABLE public.open_debit_f;
-TRUNCATE TABLE public.open_credit_f;
-TRUNCATE TABLE public.master_debit_closed_f;
-TRUNCATE TABLE public.master_credit_closed_f;
-TRUNCATE TABLE public.credit_plan_closed_f;
-TRUNCATE TABLE public.movement_dimensions_d;
--- Uploads hold the source body + metadata; clear so reloads start clean.
-TRUNCATE TABLE public.statement_uploads_f;
+TRUNCATE TABLE
+    public.open_debit_f,
+    public.open_credit_f,
+    public.master_debit_closed_f,
+    public.master_credit_closed_f,
+    public.credit_plan_closed_f,
+    public.movement_dimensions_d,
+    public.statement_uploads_f;  -- all in one statement so FKs between them are allowed
 
 -- =============================================================================
 -- 2. Source metadata: keep account (FK) + period yyyy-mm on each upload
