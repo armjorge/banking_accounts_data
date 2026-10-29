@@ -173,6 +173,96 @@ def register_user_profile(profile: Profile) -> None:
     PROFILES[profile.profile_code] = profile
 
 
+def build_user_profile(
+    *,
+    profile_code: str,
+    bank_name: str,
+    dataset: str,
+    amount_rule: str,
+    column_map: dict[str, Any],
+    has_header: bool = True,
+    header_signature: list[str] | None = None,
+    column_count: int | None = None,
+    skip_section_rows: bool = False,
+    use_header_aliases: bool = True,
+    required_fields: tuple[str, ...] | None = None,
+) -> Profile:
+    """Build a user-defined Profile from an explicit column mapping.
+
+    column_map keys are logical fields (txn_date, concept, income, outcome,
+    balance, amount, card_ref). Values are source header names (when has_header)
+    or 0-based indexes (headerless, e.g. HSBC-style).
+    """
+    if dataset not in {"debit", "credit_monthly", "credit_plan"}:
+        raise ValueError(f"unsupported dataset: {dataset}")
+    allowed_rules = {
+        "split_signed",
+        "split_positive_credit",
+        "single_signed",
+        "installment",
+        "split_credit_abs_income",
+    }
+    if amount_rule not in allowed_rules:
+        raise ValueError(f"unsupported amount_rule: {amount_rule}")
+    if not profile_code.strip() or not bank_name.strip():
+        raise ValueError("profile_code and bank_name are required")
+
+    if column_count is None:
+        if has_header:
+            column_count = len(column_map)
+        else:
+            idxs = [int(v) for v in column_map.values() if isinstance(v, int) or str(v).isdigit()]
+            column_count = (max(idxs) + 1) if idxs else len(column_map)
+
+    if required_fields is None:
+        if amount_rule == "single_signed":
+            required_fields = ("txn_date", "concept", "amount")
+        elif amount_rule == "installment":
+            required_fields = ("txn_date", "concept")
+        elif dataset == "debit" and "balance" in column_map:
+            required_fields = ("txn_date", "concept", "income", "outcome", "balance")
+        else:
+            required_fields = ("txn_date", "concept", "income", "outcome")
+
+    if has_header and header_signature is None:
+        # Sorted normalized headers for exact-match detection.
+        names = []
+        for v in column_map.values():
+            if isinstance(v, str):
+                names.append(normalize_header_str(v))
+        header_signature = sorted(set(names)) if names else None
+
+    return Profile(
+        profile_code=profile_code.strip(),
+        bank_name=bank_name.strip(),
+        dataset=dataset,
+        has_header=has_header,
+        header_signature=header_signature,
+        column_count=int(column_count),
+        column_map=dict(column_map),
+        amount_rule=amount_rule,
+        skip_section_rows=skip_section_rows,
+        use_header_aliases=use_header_aliases and has_header,
+        required_fields=tuple(required_fields),
+    )
+
+
+def open_accounts_touched(payload: dict[str, Any]) -> set[str]:
+    """Account numbers that an open-period reload payload will replace.
+
+    Used by callers (and tests) to assert per-account replace semantics:
+    only these accounts are deleted+inserted; others stay untouched.
+    """
+    touched: set[str] = set()
+    for kind in ("debit", "credit"):
+        for row in payload.get(kind) or []:
+            acct = str(row.get("account_number") or "").strip()
+            if acct:
+                touched.add(acct)
+    return touched
+
+
+
 def normalize_header_str(text: str) -> str:
     """Normalize a single column header: strip BOM, NBSP, accents, lowercase, trim."""
     cleaned = text.replace("\u00a0", " ").replace("\ufeff", "").strip().lower()

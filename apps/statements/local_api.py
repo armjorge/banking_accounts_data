@@ -185,7 +185,27 @@ class StatementHandler(BaseHTTPRequestHandler):
                     ),
                 )
             return 200, _json(cur.fetchone()[0])
-        if method == "DELETE" and path.startswith("/uploads/"):
+        if method == "POST" and path == "/profiles":
+            # User-configurable bank mapping -> file_profiles_d
+            cur.execute(
+                "SELECT public.upsert_user_file_profile(%s::jsonb)",
+                (json.dumps(body.get("profile") or body),),
+            )
+            return 200, {"profile_code": cur.fetchone()[0]}
+        if method == "POST" and path == "/open-reload":
+            # Open period: replace only accounts present in payload
+            cur.execute(
+                "SELECT public.reload_open_movements(%s::jsonb)",
+                (json.dumps(body),),
+            )
+            return 200, _json(cur.fetchone()[0])
+        if method == "POST" and path == "/open-replace":
+            cur.execute(
+                "SELECT public.replace_open_account_movements(%s, %s::jsonb)",
+                (body.get("account_id"), json.dumps(body.get("rows") or [])),
+            )
+            return 200, _json(cur.fetchone()[0])
+                if method == "DELETE" and path.startswith("/uploads/"):
             upload_id = path.removeprefix("/uploads/")
             cur.execute("SELECT public.delete_statement_upload(%s::uuid)", (upload_id,))
             return 200, {"ok": True}
