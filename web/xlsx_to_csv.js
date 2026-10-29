@@ -244,5 +244,33 @@
     return rowsToCsv(out);
   }
 
+  /**
+   * Name stored in statement_uploads_f / UI for a statement CSV.
+   * Spreadsheet uploads always become bank_account_period.csv.
+   * Native CSV keeps its name when it already carries bank or account;
+   * otherwise the same canonical form is used. Extension is always .csv.
+   */
+  function strmStoredUploadFilename(originalName, meta) {
+    const bank = String((meta && meta.bank) || "").trim();
+    const account = String((meta && meta.accountNumber) || "").trim();
+    const period = String((meta && meta.period) || "").trim();
+    let name = String(originalName || "statement").trim() || "statement";
+    const fromSheet = /\.(xlsx|xlsm|xls)$/i.test(name);
+    if (fromSheet) {
+      name = name.replace(/\.(xlsx|xlsm|xls)$/i, ".csv");
+    } else if (!/\.csv$/i.test(name)) {
+      name = name + ".csv";
+    }
+    const lower = name.toLowerCase();
+    const hasBank = bank && lower.indexOf(bank.toLowerCase()) >= 0;
+    const hasAccount = account && lower.indexOf(account.toLowerCase()) >= 0;
+    if (fromSheet || (!hasBank && !hasAccount)) {
+      const parts = [bank, account, period].filter(Boolean);
+      name = (parts.length ? parts.join("_") : "statement") + ".csv";
+    }
+    return name.replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  }
+
   global.strmXlsxToCsv = strmXlsxToCsv;
+  global.strmStoredUploadFilename = strmStoredUploadFilename;
 })(typeof window !== "undefined" ? window : globalThis);

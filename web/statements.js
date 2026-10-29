@@ -115,6 +115,9 @@ function renderStatements(root, session) {
           data-account="${escapeStatementHtml(account.account_id)}"
           data-cutoff="${escapeStatementHtml(period.cutoff_id)}"
           data-slot="${escapeStatementHtml(slot)}"
+          data-bank="${escapeStatementHtml(account.bank_name || "")}"
+          data-account-number="${escapeStatementHtml(account.account_number || "")}"
+          data-period="${escapeStatementHtml(period.period_label || "")}"
         />
       </label>
     `;
@@ -370,6 +373,15 @@ function renderStatements(root, session) {
           const decoded = await decodeBankCsv(file);
           text = decoded.text;
           encoding = decoded.encoding;
+        }
+        if (typeof strmStoredUploadFilename === "function") {
+          body.filename = strmStoredUploadFilename(file.name, {
+            bank: dataset.bank || "",
+            accountNumber: dataset.accountNumber || "",
+            period: dataset.period || "",
+          });
+        } else if (isXlsx) {
+          body.filename = String(file.name || "statement").replace(/\.xlsx?$/i, ".csv").replace(/\.xlsm$/i, ".csv");
         }
         body.csv = text;
         body.encoding = encoding;

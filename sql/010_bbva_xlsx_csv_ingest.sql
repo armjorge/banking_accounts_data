@@ -99,6 +99,8 @@ DECLARE
     v_has_header BOOLEAN;
     v_delim TEXT := COALESCE(NULLIF(p_delimiter, ''), ',');
     v_filename TEXT := LEFT(BTRIM(COALESCE(p_filename, '')), 200);
+    v_period_ym TEXT;
+    v_from_sheet BOOLEAN := FALSE;
     v_csv TEXT;
     v_first_row TEXT [];
     v_parsed_rows TEXT [] := ARRAY[]::TEXT [];
@@ -170,6 +172,32 @@ BEGIN
     END IF;
     IF NOT (p_as_of > v_period_end) THEN
         RAISE EXCEPTION 'The period is not open for upload yet' USING ERRCODE = '22023';
+    END IF;
+
+    -- Stored upload is always CSV; spreadsheet uploads get a canonical
+    -- bank_account_period.csv name so BBVA matches Banorte/HSBC metadata.
+    v_period_ym := TO_CHAR(v_period_end, 'YYYY-MM');
+    v_from_sheet := v_filename ~* '\.(xlsx|xlsm|xls)$';
+    IF v_from_sheet THEN
+        v_filename := REGEXP_REPLACE(v_filename, '\.(xlsx|xlsm|xls)$', '.csv', 'i');
+    ELSIF v_filename !~* '\.csv$' THEN
+        v_filename := v_filename || '.csv';
+    END IF;
+    IF v_from_sheet
+        OR (
+            POSITION(LOWER(v_bank_name) IN LOWER(v_filename)) = 0
+            AND POSITION(v_account_number IN v_filename) = 0
+        )
+    THEN
+        v_filename := LEFT(
+            REGEXP_REPLACE(
+                FORMAT('%s_%s_%s.csv', v_bank_name, v_account_number, v_period_ym),
+                '[^\w.\-]+',
+                '_',
+                'g'
+            ),
+            200
+        );
     END IF;
     IF p_slot = 'installment' AND v_kind <> 'credit' THEN
         RAISE EXCEPTION 'Debit accounts do not have an installment file' USING ERRCODE = '23514';
@@ -637,7 +665,7 @@ BEGIN
         COALESCE(p_encoding, 'utf-8'),
         v_delim,
         v_profile,
-        TO_CHAR(v_period_end, 'YYYY-MM')
+        v_period_ym
     );
 
     IF v_dataset = 'debit' THEN
@@ -942,7 +970,12 @@ BEGIN
         'profile', v_profile,
         'curated_csv_backup', v_curated,
         'tenant_id', v_tenant,
-        'file_suffix', 'csv'
+        'file_suffix', 'csv',
+        'original_filename', v_filename,
+        'bank_name', v_bank_name,
+        'account_number', v_account_number,
+        'period_ym', v_period_ym,
+        'cutoff_id', p_cutoff_id
     );
 END
 $fn$;
