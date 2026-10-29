@@ -3,6 +3,7 @@ dialect = postgres
 templater = jinja
 max_line_length = 120
 exclude_rules = LT05
+large_file_skip_byte_limit = 0
 
 [sqlfluff:templater:jinja:context]
 NEON_DATABASE = neondb

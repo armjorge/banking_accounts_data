@@ -9,6 +9,7 @@ dependencies = [
   "botocore[crt]>=1.35.0",
   "psycopg[binary]>=3.2.0",
   "watchdog>=6.0.0",
+  "openpyxl>=3.1.0",
 ]
 
 [dependency-groups]
@@ -18,5 +19,5 @@ dev = ["pytest>=8.0"]
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["apps/config_console"]
-testpaths = ["apps/config_console/tests"]
+pythonpath = ["apps/config_console", "apps"]
+testpaths = ["apps/config_console/tests", "apps/statements/tests"]

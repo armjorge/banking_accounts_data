@@ -148,12 +148,16 @@ def neon_database_from_url(url: str) -> str:
 
 
 def connectable_url(url: str) -> str:
-    """Keep sslmode=require. Drop channel_binding so psycopg does not need extra SCRAM options."""
+    """Keep an explicit sslmode. Drop channel_binding so psycopg does not need extra SCRAM options."""
     parsed = urlparse(url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     query.pop("channel_binding", None)
     query.setdefault("sslmode", "require")
-    return urlunparse(parsed._replace(query=urlencode(query)))
+    rendered = urlunparse(parsed._replace(query=urlencode(query)))
+    # urlunparse collapses "scheme:///" (local socket) to "scheme:/".
+    if parsed.scheme.startswith("postgres") and parsed.netloc == "" and rendered.startswith(f"{parsed.scheme}:/"):
+        rendered = f"{parsed.scheme}:///{rendered[len(parsed.scheme) + 2:]}"
+    return rendered
 
 
 def render_sql(

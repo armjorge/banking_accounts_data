@@ -179,20 +179,106 @@ Sign-in and the page list work on localhost. Loading and saving banks, account t
 4. Bootstrap CDK only if this account/region has never been bootstrapped.
 5. Recreate `web/config.js` with the steps in **Run the signed-in page locally**. That file is gitignored.
 
-## Product tiers (later)
+## Product tiers
 
-| Plan | Data | API |
+Limits are enforced in `public.plans_d` and the `bank_accounts_d` trigger. Applying `sql/006_statement_flow.sql` again resets these caps.
+
+| Plan | Accounts | Curated CSV vault |
 | --- | --- | --- |
-| Entry | Local app data, bank templates | None |
-| Plus | Cloud Postgres + Snowflake backup | Metered |
-| Premium | Same | Higher quota |
+| Free, and the legacy Entry row | 1 credit card and 1 debit account. Savings uses the debit slot. | No |
+| Plus | 10 accounts, any mix | No |
+| Premium | 10 accounts, any mix | Yes |
+
+An 11th account is rejected. More than 10 accounts is not another shared plan. It is a private deployment of this same repository in the client's own AWS account and their own Neon project, created again from the config console. That deployment is not a wizard in this MVP.
+
+## File catcher
+
+Only Banorte is loaded. A signed-in user opens an account (bank debit, bank credit card, or savings) and types the account number as text, so `0639` keeps its leading zero. Credit cards also take a cutoff day and a payment window in days (`credit_days` on the lineage example is 20). Debit and savings have no cutoff: the period ends on the last day of the month.
+
+The page then shows the latest period whose cutoff is already in the past, plus the two before it. On 2026-10-20 that is `2026-10`, `2026-09`, `2026-08` for a credit card with cutoff day 6, and `2026-09`, `2026-08`, `2026-07` for a debit account. Each row stores `period_start` and `period_end`. The `YYYY-MM` label is derived from `period_end`. The user can add the previous period or remove an older empty one. The three current periods stay. A period stays pending until its statement CSV is in the closed master. Premium can also attach an optional PDF; that PDF does not clear the pending flag.
+
+CSV text is parsed in Postgres after the browser decodes it. A temporary S3 upload is not used: a rejected file leaves no object and no rows. Premium then copies the same bytes to `curated/{tenant}/{upload}.csv` (or `.pdf`) in the curated bucket. Deleting a file removes that file's rows only. The vault object stays.
+
+Closed masters are append-only. `open_debit_f` and `open_credit_f` are replaced for the signed-in user by `reload_open_movements`. A daily job run as the table owner can call `truncate_open_movements()` and then reload. Dimensions in `movement_dimensions_d` are keyed by tenant and `row_hash` and are not deleted with the file or the open book.
+
+`row_hash` is the normalized date, the account number, the amount, `concept_sk`, and an occurrence counter for identical same-day rows. Balance, period, and file are not in the hash. `concept_sk` is the digits in the trimmed concept, or the letters when there are no digits. Debit amount is `cargos + abonos`. Credit statement amount is `cargo - abono`. Installment amount is `mensualidad`. A second file that repeats a hash is rejected as already uploaded, and the whole load rolls back.
+
+### What the Banorte samples showed
+
+| File | Shape | Encoding and quirks |
+| --- | --- | --- |
+| Debit export | `Fecha, Concepto, Cargos, Abonos, Saldos` | UTF-8, LF, comma. Charges are already negative, deposits positive, and the other side is `0.0`. One concept is a long SPEI line. No non-breaking space in this file. 11 movements. |
+| Credit statement | `Fecha, Concepto, Abono, Cargo, Tarjeta` | UTF-8, CRLF, comma. `Tarjeta` looks like `Titular ***3978`. Two Microsoft rows are identical, so the occurrence counter is required. 31 movements. |
+| Installment export | `Fecha de operación, Tasa anual, Importe inicial, Importe pendiente, Concepto, Pagos pendientes, Mensualidad` | Windows-1252 (`ó` is byte `0xF3`), CRLF. `Tasa anual` is `0.0000%`. `Pagos pendientes` is the text ` 03/03`, not a number. 1 movement. |
+
+The loader lowercases headers, strips accents, and accepts either line ending. The browser tries UTF-8 and falls back to Windows-1252, then folds non-breaking spaces to spaces. The lineage concepts end in a non-breaking space; these three samples do not.
+
+### Supported banks and statement profiles
+
+Statement ingestion maps bank-specific CSV exports into a common canonical schema:
+
+| Profile code | Bank | Dataset | Header / Shape | Amount convention | Encoding |
+| --- | --- | --- | --- | --- | --- |
+| `banorte_debit_v1` | Banorte | debit | `Fecha, Concepto, Cargos, Abonos, Saldos` | Cargos negative, Abonos positive, Saldos balance | UTF-8 / Windows-1252 |
+| `banorte_credit_monthly_v1` | Banorte | credit_monthly | `Fecha, Concepto, Abono, Cargo, Tarjeta` | Both positive (mapped to cargos = -cargo, abonos = abono) | UTF-8 |
+| `banorte_credit_plan_v1` | Banorte | credit_plan | `Fecha de operación, Tasa anual, Importe inicial, Importe pendiente, Concepto, Pagos pendientes, Mensualidad` | Mensualidad positive, parses "03/12" into pagos_hechos/pagos_totales | Windows-1252 |
+| `hsbc_debit_v1` | HSBC | debit | Headerless, 3 columns (`date, description, signed amount`) | Signed amount (e.g. `"-21,878.96"`), quoted thousands comma, Saldos NULL | UTF-8 |
+| `bbva_*` | BBVA | debit / credit | BBVA-ready (add registry row when sample arrives) | TBD | TBD |
+
+#### How to add a bank or profile
+
+1. Insert a row into `public.file_profiles_d` (and mirror in `PROFILES` in `apps/statements/profiles.py`):
+   - Set `profile_code`, `bank_name`, `dataset` (`debit`, `credit_monthly`, `credit_plan`).
+   - If the file has headers: set `has_header = TRUE`, `header_signature = ARRAY['sorted', 'normalized', 'headers']`.
+   - If headerless: set `has_header = FALSE`, `header_signature = NULL`, and `column_count`.
+   - Specify `amount_rule` (`split_signed`, `split_positive_credit`, `single_signed`, `installment`).
+2. Add a synthetic, anonymized test fixture in `apps/statements/tests/fixtures/`.
+3. Add a test in `apps/statements/tests/test_profiles.py`.
+4. Ensure the bank exists in `public.banks_d`. No code change is required unless a new amount rule is needed.
+
+### Apply it from the config console
+
+From the repository root, with the Neon URL saved:
+
+```bash
+uv run streamlit run apps/config_console/app.py
+```
+
+1. **Apply users DDL** if `cognito_users.users` is not there yet.
+2. **Apply banking DDL**. This runs `sql/004_public_banking.sql` only when `public.bank_accounts_d` is missing, then `sql/006_statement_flow.sql`. It does not deploy AWS. Repeating it keeps uploaded files and resets the plan caps.
+3. **Deploy AWS objects** when you want the statements API and the curated bucket. That deploy was not run for this change. The curated bucket is versioned, locked in governance mode for 365 days, and its `curated/*` keys deny delete. It is retained if the stack is destroyed. An account admin can replace the bucket policy; the application role cannot delete the objects.
+
+Publish the site after the API exists so `config.js` receives `apiUrl`. Admins open **Statements** from the page list. Other signed-in users land on the statements page directly.
+
+### UAT checklist
+
+1. Apply users DDL, then banking DDL, against the Neon database. Do not expect AWS resources until **Deploy AWS objects**.
+2. Sign in. Open Banorte debit `0639` with no cutoff, and credit `3978` with cutoff day 6 and a 20-day payment window. Confirm the account number still shows `0639`.
+3. On a date of 2026-10-20 (or any later October date before the 31st), debit periods are 2026-07 through 2026-09 and credit periods are 2026-08 through 2026-10. October debit has no slot. The credit card shows cutoff day 6 and a 20-day payment window. October starts 2026-09-07 and its cutoff is 2026-10-06. The statements API also returns `payment_due` as that cutoff plus 20 days (2026-10-26).
+4. Drop the debit sample on a debit period, the credit statement sample on a credit statement slot, and the installment sample on the installment slot. All three load. The two identical Microsoft rows both appear.
+5. Drop the same debit file again. The page says `already uploaded` and no extra rows appear.
+6. Delete the file. Every row from that file disappears, the period is pending again, and a dimension row for the hash remains.
+7. Add the previous period, then remove it while it is empty. A period that has a file, or one of the three current periods, cannot be removed.
+8. On Free, a second debit or a second credit is rejected. On Premium, the 11th account is rejected with the private-deployment message.
+9. Premium shows an optional PDF slot. Free does not. Deleting a file does not delete `curated/...` in S3.
+
+### Assumptions
+
+- Comma-separated CSV. Dates are `DD/MM/YYYY` or `YYYY-MM-DD`. Header check is the whole header set after folding case and accents, not a single-column map. Signs are stored as exported. Zeros stay zeros. `Pagos pendientes` stays text.
+- The installment file is its own slot. It does not clear the statement pending flag. The optional PDF is the same: tracked on the period, not inserted as master rows.
+- "Past the cutoff" means the date is strictly after `period_end`. February 31 clamps to the last day of February.
+- Savings uses the debit file, the month-end close, and the free plan's debit slot.
+- Open-book truncate is per signed-in user inside `reload_open_movements`. `truncate_open_movements()` deletes every tenant's open rows and is not granted to `strm_app`.
+- Re-applying the statement SQL resets plan caps. The first apply replaces an older statement-table shape that has no `row_hash`. Later applies keep files.
+- The statements API reads and writes `cognito_users.users`, matching `sql/004_public_banking.sql`.
+- More than 10 accounts is a private deployment of this repository in the client's own AWS account and Neon project, from the config console. There is no wizard for that.
 
 ## Repo layout
 
 ```
 apps/config_console/   Streamlit operator UI
 infra/                 CDK (control + per-environment + login Lambda)
-sql/                   001–002 login DDL now; 003–004 app model later
+sql/                   001–002 login, 004 banking model, 006 statement flow
 web/                   Cognito login page (local config.js is gitignored)
 scripts/cdk-bootstrap.sh
 config/                Example config (no real secrets)

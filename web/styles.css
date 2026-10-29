@@ -3,6 +3,10 @@
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -187,6 +191,47 @@ a.button {
   cursor: pointer;
 }
 
-.error {
+.error,
+#statement-status.error,
+#status.error {
   color: #fecaca;
+}
+
+.muted {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.dropzone {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px dashed #38bdf8;
+  border-radius: 0.4rem;
+  color: #7dd3fc;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.dropzone input {
+  max-width: 9rem;
+  font-size: 0.75rem;
+}
+
+.dropzone.drag {
+  background: #0c4a6e;
+}
+
+.file-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.file-line button {
+  margin-top: 0;
+  padding: 0.3rem 0.55rem;
 }

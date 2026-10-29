@@ -120,7 +120,9 @@ async function route(
       "SELECT bank_id, bank_name FROM public.banks_d ORDER BY bank_id",
     );
     const accountTypes = await client.query(
-      "SELECT a_type_id, type_name FROM public.account_types_d ORDER BY a_type_id",
+      `SELECT a_type_id, type_name, ledger_kind, allows_cutoff
+       FROM public.account_types_d
+       ORDER BY a_type_id`,
     );
     const templates = await client.query(
       `SELECT t.bank_id, b.bank_name, t.a_type_id, a.type_name, t.headers

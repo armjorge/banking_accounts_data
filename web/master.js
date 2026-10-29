@@ -14,6 +14,12 @@ function isAdmin(claims) {
 
 const ADMIN_PAGES = [
   {
+    id: "statements",
+    title: "Statements",
+    blurb: "Which Banorte statement file is still missing for each account and period.",
+    listed: true,
+  },
+  {
     id: "data-admin",
     title: "Data admin",
     blurb: "Banks, account types, and the header list for each pair.",
@@ -147,6 +153,10 @@ function renderMasterBanking(root, session) {
     }
     const page = ADMIN_PAGES.find((item) => item.id === pageId);
     heading.textContent = page ? page.title : "Pages";
+    if (pageId === "statements") {
+      window.renderStatements(panel, { name: session.name, logout: session.logout, embedded: true });
+      return;
+    }
     drawDataAdmin();
   }
 
@@ -243,7 +253,10 @@ function renderMasterBanking(root, session) {
 
   function typesSection() {
     const rows = catalog.accountTypes
-      .map((row) => `<tr><td>${escapeHtml(row.a_type_id)}</td><td>${escapeHtml(row.type_name)}</td></tr>`)
+      .map(
+        (row) =>
+          `<tr><td>${escapeHtml(row.a_type_id)}</td><td>${escapeHtml(row.type_name)}</td><td>${escapeHtml(row.ledger_kind || "")}</td><td>${row.allows_cutoff ? "Yes" : "No"}</td></tr>`,
+      )
       .join("");
     const options = catalog.accountTypes
       .map(
@@ -254,9 +267,10 @@ function renderMasterBanking(root, session) {
     return `
       <section class="page-section">
         <h2>Account types</h2>
+        <p class="muted">Credit card types use a cutoff day. Debit and savings types close on the last day of the month.</p>
         <table class="compact">
-          <thead><tr><th>Id</th><th>Type name</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="2">No records yet.</td></tr>`}</tbody>
+          <thead><tr><th>Id</th><th>Type name</th><th>Ledger</th><th>Cutoff</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="4">No records yet.</td></tr>`}</tbody>
         </table>
         ${picker("edit-type", "Choose an account type", options, "Type name")}
         <form id="add-type" class="add-form">

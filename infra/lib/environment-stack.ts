@@ -86,6 +86,29 @@ export class EnvironmentStack extends cdk.Stack {
       ],
     });
 
+    // New bucket: Object Lock can only be enabled at creation, so this is not
+    // the existing data bucket. RETAIN because locked objects cannot be emptied
+    // by a stack delete. The app role can put curated/* and cannot delete it.
+    const curatedBucket = new s3.Bucket(this, "CuratedCsvBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      versioned: true,
+      objectLockEnabled: true,
+      objectLockDefaultRetention: s3.ObjectLockRetention.governance(cdk.Duration.days(365)),
+      objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    curatedBucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: "DenyCuratedDelete",
+        effect: iam.Effect.DENY,
+        principals: [new iam.AnyPrincipal()],
+        actions: ["s3:DeleteObject", "s3:DeleteObjectVersion", "s3:BypassGovernanceRetention"],
+        resources: [curatedBucket.arnForObjects("curated/*")],
+      }),
+    );
+
     const distribution = new cloudfront.Distribution(this, "WebDistribution", {
       comment: `${prefix} static site`,
       defaultRootObject: "index.html",
@@ -113,7 +136,11 @@ export class EnvironmentStack extends cdk.Stack {
     });
 
     new s3deploy.BucketDeployment(this, "WebPlaceholder", {
-      sources: [s3deploy.Source.asset(path.join(here, "..", "..", "web"))],
+      sources: [
+        s3deploy.Source.asset(path.join(here, "..", "..", "web"), {
+          exclude: ["preview.html", "preview.js", "config.js"],
+        }),
+      ],
       destinationBucket: websiteBucket,
       distribution,
       distributionPaths: ["/*"],
@@ -241,6 +268,7 @@ export class EnvironmentStack extends cdk.Stack {
         allowMethods: [
           apigwv2.CorsHttpMethod.GET,
           apigwv2.CorsHttpMethod.PUT,
+          apigwv2.CorsHttpMethod.POST,
           apigwv2.CorsHttpMethod.DELETE,
           apigwv2.CorsHttpMethod.OPTIONS,
         ],
@@ -262,6 +290,72 @@ export class EnvironmentStack extends cdk.Stack {
       path: "/admin/{proxy+}",
       methods: adminMethods,
       integration: adminIntegration,
+      authorizer: adminAuthorizer,
+    });
+
+    const statementsFn = new nodejs.NodejsFunction(this, "StatementsApi", {
+      entry: path.join(here, "..", "lambda", "statements.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      environment: {
+        NEON_URL_PARAM: neonUrlParam,
+        CURATED_BUCKET: curatedBucket.bucketName,
+      },
+      bundling: {
+        format: nodejs.OutputFormat.CJS,
+        minify: true,
+        target: "node22",
+      },
+    });
+    statementsFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "ReadNeonUrlForStatements",
+        actions: ["ssm:GetParameter"],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${neonUrlParam}`],
+      }),
+    );
+    curatedBucket.grantPut(statementsFn, "curated/*");
+    curatedBucket.grantRead(statementsFn, "curated/*");
+    const statementsIntegration = new integrations.HttpLambdaIntegration(
+      "StatementsIntegration",
+      statementsFn,
+    );
+    adminApi.addRoutes({
+      path: "/statements",
+      methods: [apigwv2.HttpMethod.GET],
+      integration: statementsIntegration,
+      authorizer: adminAuthorizer,
+    });
+    adminApi.addRoutes({
+      path: "/accounts",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: statementsIntegration,
+      authorizer: adminAuthorizer,
+    });
+    adminApi.addRoutes({
+      path: "/periods",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: statementsIntegration,
+      authorizer: adminAuthorizer,
+    });
+    adminApi.addRoutes({
+      path: "/periods/{cutoffId}",
+      methods: [apigwv2.HttpMethod.DELETE],
+      integration: statementsIntegration,
+      authorizer: adminAuthorizer,
+    });
+    adminApi.addRoutes({
+      path: "/uploads",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: statementsIntegration,
+      authorizer: adminAuthorizer,
+    });
+    adminApi.addRoutes({
+      path: "/uploads/{uploadId}",
+      methods: [apigwv2.HttpMethod.DELETE],
+      integration: statementsIntegration,
       authorizer: adminAuthorizer,
     });
 
@@ -298,6 +392,7 @@ export class EnvironmentStack extends cdk.Stack {
       "user-pool-client-id": userPoolClient.userPoolClientId,
       "identity-pool-id": identityPool.identityPoolId,
       "api-url": adminApi.apiEndpoint,
+      "curated-bucket": curatedBucket.bucketName,
       region: this.region,
       prefix,
     };

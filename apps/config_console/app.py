@@ -30,7 +30,7 @@ from catalog import (
 from deploy import deploy_environment
 from env_store import list_environments, load_environment, save_environment, save_infra_outputs
 from bootstrap_env import bootstrap_environment
-from postgres_ops import apply_users_ddl, list_tables, ping
+from postgres_ops import apply_banking_ddl, apply_users_ddl, list_tables, ping
 from site_publish import publish_frontend
 
 
@@ -267,8 +267,12 @@ if st.button("Save variables to config bucket", type="primary"):
 
 st.subheader("4. Deploy this environment")
 st.write(
-    "Creates the static-site bucket, the app-data bucket, CloudFront, and Cognito, "
-    f"all tagged `Project=strm_bank` and `EnvPrefix={prefix}`."
+    "Creates the static-site bucket, the app-data bucket, the curated CSV vault, "
+    "CloudFront, and Cognito, "
+    f"all tagged `Project=strm_bank` and `EnvPrefix={prefix}`. "
+    "The vault bucket is versioned, has Object Lock in governance mode for 365 days, "
+    "and denies object deletes. It is created on the next deploy of this environment. "
+    "Deploy is not required to apply the database changes below."
 )
 protected = selected in {"prod", "prd", "production"}
 confirm = True
@@ -311,8 +315,8 @@ url = edited.get("neon_database_url", "")
 users_schema = edited.get("neon_users_schema") or "cognito_users"
 database = edited.get("neon_database") or "neondb"
 st.caption(
-    f"This step only creates `{database}.{users_schema}.users` "
-    "(user_id + cognito_sub). App core DDL comes later."
+    f"This step creates `{database}.{users_schema}.users` "
+    "(user_id + cognito_sub). Statement tables are the next button."
 )
 db_cols = st.columns(2)
 with db_cols[0]:
@@ -335,6 +339,25 @@ with db_cols[1]:
             st.write(list_tables(url, users_schema))
         except Exception as exc:  # noqa: BLE001
             st.error(str(exc))
+
+st.subheader("Banking statements")
+st.write(
+    "This applies `sql/004_public_banking.sql` only when `public.bank_accounts_d` "
+    "is missing, then `sql/006_statement_flow.sql`. Repeating it does not delete "
+    "uploaded CSV rows. It resets Free, Entry, Plus, and Premium account caps to "
+    "the values in that file. It does not deploy AWS."
+)
+if st.button("Apply banking DDL", disabled=not url):
+    try:
+        applied = apply_banking_ddl(
+            url,
+            users_schema=users_schema,
+            database=database,
+        )
+        st.success("Applied: " + ", ".join(applied))
+        st.write(list_tables(url, "public"))
+    except Exception as exc:  # noqa: BLE001
+        st.error(str(exc))
 
 st.subheader("7. Login site")
 st.write(

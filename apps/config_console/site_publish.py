@@ -51,7 +51,7 @@ def publish_frontend(outputs: dict[str, str], region: str) -> dict[str, str]:
     s3 = session(region).client("s3")
     uploaded: list[str] = []
     for path in WEB_DIR.rglob("*"):
-        if not path.is_file() or path.name == "config.js":
+        if not path.is_file() or path.name in {"config.js", "preview.html", "preview.js"}:
             continue
         key = path.relative_to(WEB_DIR).as_posix()
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
