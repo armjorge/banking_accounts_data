@@ -32,6 +32,7 @@
     "@aws-sdk/client-ssm": "^3.700.0",
     "aws-cdk-lib": "^2.220.0",
     "constructs": "^10.4.2",
+    "graphql": "^16.15.0",
     "pg": "^8.16.3"
   }
 }
