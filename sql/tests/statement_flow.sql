@@ -1,5 +1,6 @@
 -- sqlfluff:exclude_rules: JJ01,LT02,CP02,CP03,CP05,RF04,RF06
 -- Self-checking file-catcher cases. A failing check raises.
+-- Windows list the three closed periods plus the current (open) period from 011.
 
 DO $checks$
 DECLARE
@@ -32,11 +33,11 @@ BEGIN
     SELECT a_type_id
     INTO v_debit_type
     FROM public.account_types_d
-    WHERE type_name = 'bank debit';
+    WHERE LOWER(type_name) = 'bank debit';
     SELECT a_type_id
     INTO v_credit_type
     FROM public.account_types_d
-    WHERE type_name = 'bank credit card';
+    WHERE LOWER(type_name) = 'bank credit card';
 
     v_debit := public.create_bank_account(v_bank, v_debit_type, 'Debit', '0639', NULL, NULL, DATE '2026-10-20');
     v_credit := public.create_bank_account(v_bank, v_credit_type, 'Credit', '3978', 6, 20, DATE '2026-10-20');
@@ -50,7 +51,7 @@ BEGIN
         CROSS JOIN JSONB_ARRAY_ELEMENTS(account.value -> 'periods') AS period (value)
         WHERE account.value ->> 'account_number' = '0639'
     ) AS period_row;
-    IF v_labels IS DISTINCT FROM '2026-07,2026-08,2026-09' THEN
+    IF v_labels IS DISTINCT FROM '2026-07,2026-08,2026-09,2026-10' THEN
         RAISE EXCEPTION 'FAIL debit window %', v_labels;
     END IF;
 
@@ -62,7 +63,7 @@ BEGIN
         CROSS JOIN JSONB_ARRAY_ELEMENTS(account.value -> 'periods') AS period (value)
         WHERE account.value ->> 'account_number' = '3978'
     ) AS period_row;
-    IF v_labels IS DISTINCT FROM '2026-08,2026-09,2026-10' THEN
+    IF v_labels IS DISTINCT FROM '2026-08,2026-09,2026-10,2026-11' THEN
         RAISE EXCEPTION 'FAIL credit window %', v_labels;
     END IF;
 
@@ -103,7 +104,7 @@ BEGIN
     END IF;
     IF (
         SELECT account_number
-        FROM public.master_debit_closed_f
+        FROM public.movement_keys_v
         WHERE file_id = (v_loaded ->> 'file_id')::UUID
     ) IS DISTINCT FROM '0639' THEN
         RAISE EXCEPTION 'FAIL account number was not kept as text';
@@ -140,7 +141,7 @@ BEGIN
     IF (SELECT COUNT(*) FROM public.master_debit_closed_f WHERE account_id = v_debit) <> 0 THEN
         RAISE EXCEPTION 'FAIL file delete left rows';
     END IF;
-    IF (SELECT COUNT(*) FROM public.movement_dimensions_d WHERE account_id = v_debit) <> 1 THEN
+    IF (SELECT COUNT(*) FROM public.debit_d WHERE account_id = v_debit) <> 1 THEN
         RAISE EXCEPTION 'FAIL file delete removed the dimension';
     END IF;
 
