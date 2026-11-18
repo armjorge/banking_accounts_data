@@ -114,6 +114,12 @@ ADD CONSTRAINT account_types_d_ledger_kind_check CHECK (
         ledger_kind = 'debit'
         AND NOT allows_cutoff
     )
+    -- Investment / asset accounts (sql/017). Kept here so re-running this file after 017
+    -- does not reject the seeded 'investment' and 'asset' types.
+    OR (
+        ledger_kind = 'asset'
+        AND NOT allows_cutoff
+    )
 );
 
 INSERT INTO public.account_types_d (type_name, ledger_kind, allows_cutoff)
