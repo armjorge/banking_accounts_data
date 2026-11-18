@@ -898,3 +898,53 @@ def test_master_tables_share_the_same_columns(conn, tables):
         elif columns != reference:
             differences[table] = {"order": [name for name, _ in columns]}
     assert not differences, f"columns differ from {tables[0]}: {differences}"
+
+
+SQL_025 = Path(__file__).resolve().parents[3] / "sql" / "025_asset_period_pdf.sql"
+
+
+def test_asset_upload_reuses_saved_map_and_takes_a_pdf(conn):
+    user_id, tenant_id = _owner(conn, "asset-map-pdf@example.com")
+    conn.execute(SQL_023.read_text())
+    conn.execute(SQL_025.read_text())
+    conn.execute(
+        "UPDATE public.tenants_d SET plan_code = (SELECT plan_code FROM public.plans_d WHERE curated_csv_backup "
+        "LIMIT 1) WHERE tenant_id = %s",
+        (tenant_id,),
+    )
+    _session(conn, user_id, tenant_id)
+    account_id = _asset_account(conn, "Cetesdirecto", "CETES", "816055")
+    csv_text = "txn_date,concept,abono,cargo\n30/09/26,Rend,10,0\n"
+    first_map = {"txn_date": "txn_date", "concept": "concept", "abono": "abono", "cargo": "cargo"}
+    _ingest_assets(conn, account_id, csv_text, first_map, "cetes.csv", template="Cetes")
+
+    same_headers = "txn_date,concept,abono,cargo\n31/10/26,Rend,20,0\n"
+    preview = _one(
+        conn, "SELECT public.column_map_preview(%s, %s, %s::jsonb)",
+        (account_id, same_headers, json.dumps({"header_row": 1, "date_format": "DMY"})),
+    )
+    assert preview["saved_mapping"]["template_name"] == "Cetes"
+    changed = _one(
+        conn, "SELECT public.column_map_preview(%s, %s, %s::jsonb)",
+        (account_id, "fecha,detalle,importe\n31/10/26,Rend,20\n", json.dumps({"header_row": 1})),
+    )
+    assert changed["saved_mapping"] is None
+
+    home = _one(conn, "SELECT public.statement_home('2026-11-14')")
+    september = next(
+        p for item in home["accounts"] if item["account_id"] == account_id
+        for p in item["periods"] if p["period_label"] == "2026-09"
+    )
+    assert september["show_pdf_slot"] is True
+    pdf = _one(
+        conn, "SELECT public.ingest_period_pdf_upload(%s, %s, 'sep.pdf', 'sep.pdf', %s, '2026-11-14')",
+        (account_id, september["cutoff_id"], "JVBERi0xLjQK"),
+    )
+    assert pdf["dataset"] == "pdf"
+    home = _one(conn, "SELECT public.statement_home('2026-11-14')")
+    september = next(
+        p for item in home["accounts"] if item["account_id"] == account_id
+        for p in item["periods"] if p["period_label"] == "2026-09"
+    )
+    assert september["pdf_upload_id"] == pdf["upload_id"] and september["show_pdf_slot"] is False
+    assert september["removable"] is False
