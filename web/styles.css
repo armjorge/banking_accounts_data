@@ -235,3 +235,44 @@ a.button {
   margin-top: 0;
   padding: 0.3rem 0.55rem;
 }
+
+/* sql/015: dimensions page */
+details.dim-group { margin: 0.75rem 0; }
+details.dim-group > summary,
+details.dim-layer > summary { cursor: pointer; padding: 0.25rem 0; }
+details.dim-layer { margin-left: 1.25rem; }
+.dim-body { margin: 0.5rem 0 1rem; }
+.dim-filter,
+.dim-edit { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; margin: 0.5rem 0; }
+.dim-edit p { flex-basis: 100%; margin: 0; }
+table.compact td.num { text-align: right; }
+table.compact tr.selected td { background: rgba(56, 189, 248, 0.12); }
+
+/* sql/016: upload completeness, transfer tags, Lists page */
+.fill-card details { margin: 0.35rem 0; }
+.fill-card details > summary { cursor: pointer; padding: 0.2rem 0; }
+details.fill-bank { margin-left: 1.25rem; }
+details.fill-account { margin-left: 1.25rem; }
+.fill-periods { list-style: none; margin: 0.25rem 0 0.5rem 1.25rem; padding: 0; }
+.fill-period { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; padding: 0.15rem 0; }
+.fill-badge { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--fill); }
+.fill-bar { display: inline-block; width: 4.5rem; height: 0.5rem; border-radius: 0.25rem; background: #e5e7eb; overflow: hidden; }
+.fill-bar > span { display: block; height: 100%; background: var(--fill); }
+.fill-complete strong { color: hsl(120, 75%, 30%); }
+.tag { display: inline-block; padding: 0 0.35rem; border-radius: 0.25rem; font-size: 0.85em; background: #eef2ff; color: #3730a3; white-space: nowrap; }
+.tag.warn { background: #fef3c7; color: #92400e; }
+.tag.transfer { background: #e0f2fe; color: #075985; }
+tr.review td { background: rgba(245, 158, 11, 0.12); }
+.dim-transfer { margin: 0.5rem 0 1rem; padding: 0.5rem; border-left: 3px solid #bae6fd; }
+.slot-form, form.inline, .bank-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.4rem 0; }
+.bank-actions input { width: auto; flex: 1 1 10rem; min-width: 8rem; }
+.bank-actions button { margin-top: 0; padding: 0.4rem 0.75rem; }
+.bank-block { margin: 0; }
+details.list-card { margin: 0.5rem 0; padding: 0.25rem 0.5rem; border: 1px solid #e5e7eb; border-radius: 0.35rem; }
+details.list-card > summary { cursor: pointer; }
+
+/* sql/017: Investments & Assets page */
+.asset-concept { flex-basis: 100%; }
+.asset-concept input { width: min(100%, 48rem); }
+#asset-map [data-add-column] { font-size: 0.85em; padding: 0.1rem 0.4rem; }
+tfoot td { border-top: 1px solid currentColor; }

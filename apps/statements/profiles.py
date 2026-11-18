@@ -787,9 +787,15 @@ def normalize_rows(
             importe_pendiente = parse_amount(row[idx["importe pendiente"]])
             pagos_pendientes = row[idx["pagos pendientes"]].strip()
             mensualidad = parse_amount(row[idx["mensualidad"]])
+            # Banorte "Pagos pendientes" NN/MM: NN payments still due out of MM.
             pagos_match = re.search(r"(\d+)\s*/\s*(\d+)", pagos_pendientes)
-            pagos_hechos = int(pagos_match.group(1)) if pagos_match else None
+            pagos_restantes = int(pagos_match.group(1)) if pagos_match else None
             pagos_totales = int(pagos_match.group(2)) if pagos_match else None
+            pagos_hechos = (
+                pagos_totales - pagos_restantes
+                if pagos_restantes is not None and pagos_totales is not None
+                else None
+            )
             outcome = -mensualidad
             income = Decimal("0.00")
             amount = mensualidad
@@ -809,6 +815,7 @@ def normalize_rows(
                         "importe_inicial": importe_inicial,
                         "importe_pendiente": importe_pendiente,
                         "pagos_pendientes": pagos_pendientes,
+                        "pagos_restantes": pagos_restantes,
                         "pagos_hechos": pagos_hechos,
                         "pagos_totales": pagos_totales,
                         "mensualidad": mensualidad,

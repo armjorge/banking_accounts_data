@@ -174,10 +174,11 @@ def test_normalize_banorte_installments():
     normalized = normalize_rows(profile, rows, account_id=10)
 
     assert len(normalized) == 3
-    # First row has " 03/12"
+    # First row has " 03/12": 3 payments still due out of 12, so 9 already made.
     row1 = normalized[0]
-    assert row1["pagos_hechos"] == 3
+    assert row1["pagos_restantes"] == 3
     assert row1["pagos_totales"] == 12
+    assert row1["pagos_hechos"] == 9
     assert row1["mensualidad"] == Decimal("797.33")
 
 

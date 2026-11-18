@@ -25,3 +25,13 @@ def test_010_replaces_ingest():
 def test_010_accepts_cargo_aliases():
     assert "cargos', 'cargo'" in SQL or "'cargos', 'cargo'" in SQL
     assert "abonos', 'abono'" in SQL or "'abonos', 'abono'" in SQL
+
+
+def test_010_forces_csv_filename_with_bank_account():
+    assert "v_from_sheet" in SQL
+    assert "bank_account_period.csv" in SQL or "FORMAT('%s_%s_%s.csv'" in SQL
+    assert "original_filename', v_filename" in SQL
+    assert "period_ym', v_period_ym" in SQL
+    assert "account_number', v_account_number" in SQL
+    assert "bank_name', v_bank_name" in SQL
+    assert "file_suffix', 'csv'" in SQL

@@ -4,9 +4,8 @@ window.STRM_CONFIG = {
   cognitoDomain: "http://127.0.0.1:8765",
 };
 sessionStorage.setItem("strm_tokens", JSON.stringify({ id_token: "preview" }));
-window.renderStatements(document.getElementById("app"), {
+window.renderUserPages(document.getElementById("app"), {
   name: "preview@example.com",
-  embedded: false,
   logout() {
     sessionStorage.removeItem("strm_tokens");
     window.location.reload();

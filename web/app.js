@@ -151,7 +151,7 @@ async function main() {
     window.renderMasterBanking(root, { name, logout });
     return;
   }
-  window.renderStatements(root, { name, logout, embedded: false });
+  window.renderUserPages(root, { name, logout });
 }
 
 main();
