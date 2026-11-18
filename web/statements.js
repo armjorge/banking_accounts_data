@@ -400,12 +400,14 @@ function renderStatements(root, session) {
         const remove = period.removable
           ? `<button type="button" data-remove-period="${escapeStatementHtml(period.cutoff_id)}">Remove</button>`
           : "";
+        const pdf = home.curated_csv_backup ? `<td>${pdfCell(account, period)}</td>` : "";
         return `
           <tr>
             <td>${escapeStatementHtml(period.period_label)}<br><span class="muted">${status}</span></td>
             <td>${escapeStatementHtml(period.period_start)}</td>
             <td>${escapeStatementHtml(period.period_end)}</td>
             <td>${files}${dropZone(account, period, "asset", label, sheetAccept)}</td>
+            ${pdf}
             <td>${remove}</td>
           </tr>`;
       })
@@ -415,7 +417,7 @@ function renderStatements(root, session) {
         <p class="muted">${escapeStatementHtml(account.bank_name)} · ${escapeStatementHtml(account.type_name)} · ${escapeStatementHtml(account.open_row_count ?? 0)} open row(s) · ${escapeStatementHtml(account.closed_row_count ?? 0)} closed row(s)</p>
         <p class="muted">A file is listed in the period of its last movement date. Rows dated this month go to the open table and are replaced by the next file; earlier dates are added to the closed table.</p>
         <table class="compact">
-          <thead><tr><th>Period</th><th>Starts</th><th>Ends</th><th>File</th><th></th></tr></thead>
+          <thead><tr><th>Period</th><th>Starts</th><th>Ends</th><th>File</th>${home.curated_csv_backup ? "<th>PDF</th>" : ""}<th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
         <button type="button" data-add-period="${escapeStatementHtml(account.account_id)}">Add the previous period</button>
@@ -1121,12 +1123,11 @@ function renderStatements(root, session) {
         body.delimiter = delimiter;
         body.source_format = isXlsx ? "xlsx" : "csv";
       }
-      if (dataset.slot === "asset") {
-        openColumnMap(file, body, "/assets/uploads");
-        return;
-      }
-      if (mapFirst) {
-        openColumnMap(file, body);
+      if (dataset.slot === "asset" || mapFirst) {
+        const route = dataset.slot === "asset" ? "/assets/uploads" : "/uploads";
+        if (!(await uploadWithSavedMap(body, route))) {
+          openColumnMap(file, body, route);
+        }
         return;
       }
       try {
@@ -1145,6 +1146,34 @@ function renderStatements(root, session) {
     } catch (error) {
       setStatus(error.message, true);
     }
+  }
+
+  // A map this account saved for the same headers is reused; the wizard opens only when
+  // the file's columns changed (or no map was saved yet).
+  async function uploadWithSavedMap(body, route) {
+    const preview = await statementApi("/statements/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        account_id: body.account_id,
+        csv: body.csv,
+        mapping: { header_row: 1, date_format: "DMY", delimiter: body.delimiter },
+      }),
+    });
+    const saved = preview.saved_mapping;
+    if (!saved || !saved.mapping) {
+      return false;
+    }
+    const result = await statementApi(route, {
+      method: "POST",
+      body: JSON.stringify({ ...body, mapping: saved.mapping, template_name: saved.template_name }),
+    });
+    const stored = result.inserted ?? result.row_count;
+    setStatus(
+      result.backup_warning
+        || `File loaded with the saved map "${saved.template_name}": ${stored} row(s) in ${result.target_table}.`,
+    );
+    await load();
+    return true;
   }
 
   function openColumnMap(file, body, route = "/uploads") {
