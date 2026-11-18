@@ -187,6 +187,39 @@ def _table_exists(url: str, schema: str, table: str) -> bool:
             return cur.fetchone() is not None
 
 
+# sql/018 rebuilds the master tables in one column layout. After it, 006-017 must not run
+# again (their old column lists no longer fit); 018 re-applies everything they defined.
+STANDARD_LAYOUT_FILE = "018_standard_masters_balances_banks.sql"
+
+
+def _superseded_by_018(name: str) -> bool:
+    prefix = name[:3]
+    return prefix.isdigit() and 6 <= int(prefix) <= 17
+
+
+def _has_standard_layout(url: str) -> bool:
+    with psycopg.connect(connectable_url(url), connect_timeout=8) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'master_debit_closed_f'
+                AND column_name = 'cutoff_id'
+            """
+        )
+        return cur.fetchone() is not None
+
+
+def migration_plan(names: tuple[str, ...], standard_layout: bool) -> tuple[str, ...]:
+    """Files to run: on a database already in the sql/018 layout, 006-017 become 018."""
+    if not standard_layout:
+        return names
+    kept = [name for name in names if not _superseded_by_018(name)]
+    if len(kept) != len(names) and STANDARD_LAYOUT_FILE not in kept:
+        kept.append(STANDARD_LAYOUT_FILE)
+    return tuple(kept)
+
+
 def _apply_files(
     url: str,
     names: tuple[str, ...],
@@ -198,6 +231,8 @@ def _apply_files(
     users = validate_schema_name(users_schema)
     app = validate_schema_name(app_schema)
     applied: list[str] = []
+    if any(_superseded_by_018(name) for name in names) and _table_exists(url, "public", "master_debit_closed_f"):
+        names = migration_plan(names, _has_standard_layout(url))
     with psycopg.connect(connectable_url(url), connect_timeout=8) as conn:
         try:
             conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{users}"')
@@ -230,7 +265,8 @@ def apply_banking_ddl(
     """Create the login tables if needed, the public banking model, then the statement flow.
 
     004 is destructive, so it runs only when ``public.bank_accounts_d`` is absent.
-    006 is safe to repeat and does not delete uploaded CSV rows.
+    006 is safe to repeat and does not delete uploaded CSV rows. On a database already in
+    the sql/018 layout, 006 and 007 are replaced by 018 (see ``migration_plan``).
     """
     applied: list[str] = []
     if not _table_exists(url, validate_schema_name(users_schema), "users"):
