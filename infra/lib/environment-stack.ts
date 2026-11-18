@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import * as cdk from "aws-cdk-lib";
 import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
 import * as authorizers from "aws-cdk-lib/aws-apigatewayv2-authorizers";
-import * as integrations from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as cognito from "aws-cdk-lib/aws-cognito";
@@ -19,6 +18,7 @@ import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 import { isProtectedEnvironment, objectPrefix, PROJECT } from "./names.js";
+import { NoPermissionLambdaIntegration } from "./no-permission-lambda-integration.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -234,31 +234,8 @@ export class EnvironmentStack extends cdk.Stack {
     new cognito.CfnUserPoolGroup(this, "AdminGroup", {
       userPoolId: userPool.userPoolId,
       groupName: "admin",
-      description: "Can edit banks, account types, and statement templates",
+      description: "Sees the full banking console",
     });
-
-    const adminApiFn = new nodejs.NodejsFunction(this, "AdminDimensions", {
-      entry: path.join(here, "..", "lambda", "admin-dimensions.ts"),
-      handler: "handler",
-      runtime: lambda.Runtime.NODEJS_22_X,
-      timeout: cdk.Duration.seconds(15),
-      memorySize: 256,
-      environment: {
-        NEON_URL_PARAM: neonUrlParam,
-      },
-      bundling: {
-        format: nodejs.OutputFormat.CJS,
-        minify: true,
-        target: "node22",
-      },
-    });
-    adminApiFn.addToRolePolicy(
-      new iam.PolicyStatement({
-        sid: "ReadNeonUrl",
-        actions: ["ssm:GetParameter"],
-        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${neonUrlParam}`],
-      }),
-    );
 
     const webOrigin = `https://${distribution.distributionDomainName}`;
     const adminApi = new apigwv2.HttpApi(this, "AdminApi", {
@@ -277,20 +254,6 @@ export class EnvironmentStack extends cdk.Stack {
     });
     const adminAuthorizer = new authorizers.HttpUserPoolAuthorizer("AdminAuthorizer", userPool, {
       userPoolClients: [userPoolClient],
-    });
-    const adminIntegration = new integrations.HttpLambdaIntegration("AdminIntegration", adminApiFn);
-    const adminMethods = [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.PUT, apigwv2.HttpMethod.DELETE];
-    adminApi.addRoutes({
-      path: "/admin",
-      methods: [apigwv2.HttpMethod.GET],
-      integration: adminIntegration,
-      authorizer: adminAuthorizer,
-    });
-    adminApi.addRoutes({
-      path: "/admin/{proxy+}",
-      methods: adminMethods,
-      integration: adminIntegration,
-      authorizer: adminAuthorizer,
     });
 
     const statementsFn = new nodejs.NodejsFunction(this, "StatementsApi", {
@@ -318,10 +281,14 @@ export class EnvironmentStack extends cdk.Stack {
     );
     curatedBucket.grantPut(statementsFn, "curated/*");
     curatedBucket.grantRead(statementsFn, "curated/*");
-    const statementsIntegration = new integrations.HttpLambdaIntegration(
+    const statementsIntegration = new NoPermissionLambdaIntegration(
       "StatementsIntegration",
       statementsFn,
     );
+    statementsFn.addPermission("ApiInvokeAll", {
+      principal: new iam.ServicePrincipal("apigateway.amazonaws.com"),
+      sourceArn: `arn:${cdk.Aws.PARTITION}:execute-api:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:${adminApi.apiId}/*/*/*`,
+    });
     adminApi.addRoutes({
       path: "/statements",
       methods: [apigwv2.HttpMethod.GET],
@@ -330,6 +297,12 @@ export class EnvironmentStack extends cdk.Stack {
     });
     adminApi.addRoutes({
       path: "/accounts",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: statementsIntegration,
+      authorizer: adminAuthorizer,
+    });
+    adminApi.addRoutes({
+      path: "/accounts/{accountId}/cutoff",
       methods: [apigwv2.HttpMethod.POST],
       integration: statementsIntegration,
       authorizer: adminAuthorizer,
@@ -358,6 +331,99 @@ export class EnvironmentStack extends cdk.Stack {
       integration: statementsIntegration,
       authorizer: adminAuthorizer,
     });
+
+    for (const [routePath, methods] of [
+      ["/dimensions", [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST]],
+      ["/dimensions/rows", [apigwv2.HttpMethod.GET]],
+      ["/api-tokens", [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST]],
+      ["/api-tokens/{tokenId}", [apigwv2.HttpMethod.DELETE]],
+      // sql/016: attribute lists and transfer links.
+      ["/lists", [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST]],
+      ["/lists/{listId}", [apigwv2.HttpMethod.POST]],
+      ["/lists/{listId}/items", [apigwv2.HttpMethod.POST]],
+      ["/list-items/{itemId}", [apigwv2.HttpMethod.POST]],
+      ["/attribute-settings", [apigwv2.HttpMethod.POST]],
+      ["/transfers", [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST]],
+      ["/transfers/detect", [apigwv2.HttpMethod.POST]],
+      ["/transfers/settings", [apigwv2.HttpMethod.POST]],
+      ["/transfers/partners", [apigwv2.HttpMethod.GET]],
+      ["/transfers/{linkHash}", [apigwv2.HttpMethod.DELETE]],
+      ["/transfers/{linkHash}/confirm", [apigwv2.HttpMethod.POST]],
+      // sql/017: Investments & Assets page.
+      ["/assets", [apigwv2.HttpMethod.GET]],
+      ["/assets/balances", [apigwv2.HttpMethod.GET]],
+      ["/assets/accounts", [apigwv2.HttpMethod.POST]],
+      ["/assets/rows", [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST]],
+      ["/assets/rows/{rowHash}", [apigwv2.HttpMethod.DELETE]],
+      ["/assets/reconcile", [apigwv2.HttpMethod.POST]],
+      ["/assets/preview", [apigwv2.HttpMethod.POST]],
+      ["/assets/uploads", [apigwv2.HttpMethod.POST]],
+      ["/assets/uploads/{uploadId}", [apigwv2.HttpMethod.DELETE]],
+      ["/assets/templates/{templateId}", [apigwv2.HttpMethod.DELETE]],
+      // sql/018: balances for any account, banks, account bank, statement column map.
+      ["/balances/{accountId}", [apigwv2.HttpMethod.GET]],
+      ["/balances/opening", [apigwv2.HttpMethod.POST]],
+      ["/balances/reconcile", [apigwv2.HttpMethod.POST]],
+      ["/balances/rows/{rowHash}", [apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE]],
+      ["/banks", [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST]],
+      ["/banks/{bankId}", [apigwv2.HttpMethod.POST, apigwv2.HttpMethod.DELETE]],
+      ["/accounts/{accountId}", [apigwv2.HttpMethod.DELETE]],
+      ["/accounts/{accountId}/bank", [apigwv2.HttpMethod.POST]],
+      ["/statements/preview", [apigwv2.HttpMethod.POST]],
+    ] as const) {
+      adminApi.addRoutes({
+        path: routePath,
+        methods: [...methods],
+        integration: statementsIntegration,
+        authorizer: adminAuthorizer,
+      });
+    }
+
+    // sql/015: GraphQL for Google Sheets. No Cognito authorizer: the Lambda checks a
+    // read-only API token and the plan quota. Throttled on its own route as a cost backstop.
+    const graphqlFn = new nodejs.NodejsFunction(this, "GraphqlApi", {
+      entry: path.join(here, "..", "lambda", "graphql.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      timeout: cdk.Duration.seconds(20),
+      memorySize: 512,
+      environment: {
+        NEON_URL_PARAM: neonUrlParam,
+      },
+      bundling: {
+        format: nodejs.OutputFormat.CJS,
+        minify: true,
+        target: "node22",
+      },
+    });
+    graphqlFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        sid: "ReadNeonUrlForGraphql",
+        actions: ["ssm:GetParameter"],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${neonUrlParam}`],
+      }),
+    );
+    const graphqlRoutes = adminApi.addRoutes({
+      path: "/graphql",
+      methods: [apigwv2.HttpMethod.POST],
+      integration: new NoPermissionLambdaIntegration("GraphqlIntegration", graphqlFn),
+    });
+    graphqlFn.addPermission("ApiInvokeAll", {
+      principal: new iam.ServicePrincipal("apigateway.amazonaws.com"),
+      sourceArn: `arn:${cdk.Aws.PARTITION}:execute-api:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:${adminApi.apiId}/*/*/*`,
+    });
+    const graphqlRate = Number(this.node.tryGetContext("graphqlRateLimit") ?? 5);
+    const graphqlBurst = Number(this.node.tryGetContext("graphqlBurstLimit") ?? 10);
+    const defaultStage = adminApi.defaultStage?.node.defaultChild as apigwv2.CfnStage | undefined;
+    defaultStage?.addPropertyOverride("RouteSettings", {
+      "POST /graphql": {
+        ThrottlingRateLimit: graphqlRate,
+        ThrottlingBurstLimit: graphqlBurst,
+      },
+    });
+    // The stage's route throttling must wait until POST /graphql exists.
+    for (const route of graphqlRoutes) defaultStage?.addDependency(route.node.defaultChild as cdk.CfnResource);
 
     const identityPool = new IdentityPool(this, "IdentityPool", {
       identityPoolName: `${prefix}_identities`,
@@ -392,6 +458,7 @@ export class EnvironmentStack extends cdk.Stack {
       "user-pool-client-id": userPoolClient.userPoolClientId,
       "identity-pool-id": identityPool.identityPoolId,
       "api-url": adminApi.apiEndpoint,
+      "graphql-url": `${adminApi.apiEndpoint}/graphql`,
       "curated-bucket": curatedBucket.bucketName,
       region: this.region,
       prefix,

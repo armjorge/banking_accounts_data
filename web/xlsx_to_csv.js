@@ -2,6 +2,8 @@
  * Minimal XLSX (OOXML) → CSV for BBVA Movimientos sheets.
  * Uses DecompressionStream(deflate-raw). No external deps.
  * Exposes: window.strmXlsxToCsv(arrayBuffer) -> Promise<string>
+ *          window.strmXlsxToRows(arrayBuffer, {sheet}) -> Promise<{sheets, sheet, rows, csv}>
+ *          (sql/017: any sheet, every row, dates as YYYY-MM-DD)
  */
 (function (global) {
   "use strict";
@@ -187,14 +189,35 @@
     return false;
   }
 
+  function normCell(c) {
+    return String(c ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // BBVA installments ("Meses sin intereses"): a header with Fecha, Mensualidad and Pagos.
+  function looksLikeInstallmentHeader(row) {
+    const joined = new Set(row.map(normCell));
+    return joined.has("fecha") && joined.has("mensualidad") && joined.has("pagos");
+  }
+
+  const ONE_COLUMN_INSTALLMENT_LABELS = ["fecha", "descripcion", "compra", "mensualidad", "pagos", "interes", "saldo actual"];
+
+  // BBVA web list pasted into one column: one value per row, starting with the 7 labels.
+  // Sent as one value per line; SQL (sql/011 reshape_one_column_installments) regroups it.
+  function isOneColumnInstallments(rows) {
+    const values = rows.filter((row) => row.length && String(row[0] ?? "").trim() !== "");
+    if (values.length < 8 || values.some((row) => row.slice(1).some((c) => String(c ?? "").trim() !== ""))) {
+      return false;
+    }
+    return ONE_COLUMN_INSTALLMENT_LABELS.every((label, i) => normCell(values[i][0]) === label);
+  }
+
   function looksLikeHeader(row) {
-    const norm = row.map((c) =>
-      String(c || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .trim(),
-    );
+    const norm = row.map(normCell);
     const joined = new Set(norm);
     return joined.has("fecha") && (joined.has("cargo") || joined.has("cargos")) && (joined.has("abono") || joined.has("abonos"));
   }
@@ -224,9 +247,28 @@
       throw new Error("XLSX has no worksheet");
     }
     const allRows = parseSheet(decodeUtf8(sheetBytes), shared);
+    if (isOneColumnInstallments(allRows)) {
+      return rowsToCsv(allRows.filter((row) => row.length && String(row[0] ?? "").trim() !== "").map((row) => [row[0]]));
+    }
     const headerIdx = allRows.findIndex(looksLikeHeader);
     if (headerIdx < 0) {
-      throw new Error("XLSX has no FECHA/CARGO/ABONO header row");
+      const planIdx = allRows.findIndex(looksLikeInstallmentHeader);
+      if (planIdx >= 0) {
+        const plan = [allRows[planIdx]];
+        for (let i = planIdx + 1; i < allRows.length; i += 1) {
+          const row = allRows[i];
+          if (isSectionRow(row)) continue;
+          if (normCell(row[0]) === "total") break;
+          const padded = row.slice();
+          while (padded.length < plan[0].length) padded.push("");
+          plan.push(padded.slice(0, plan[0].length));
+        }
+        if (plan.length < 2) {
+          throw new Error("XLSX has no installment rows");
+        }
+        return rowsToCsv(plan);
+      }
+      throw new Error("XLSX has no FECHA/CARGO/ABONO (or installment) header row");
     }
     const out = [allRows[headerIdx]];
     for (let i = headerIdx + 1; i < allRows.length; i += 1) {
@@ -245,7 +287,9 @@
   }
 
   /**
-   * Name stored in statement_uploads_f / UI for a statement CSV.
+   * Working CSV name sent as body.filename (statement_uploads_f.original_filename).
+   * The name the user picked is sent untouched as body.chosen_filename (sql/013) and is
+   * what the page shows; the vault key is built in SQL (curated_standard_key).
    * Spreadsheet uploads always become bank_account_period.csv.
    * Native CSV keeps its name when it already carries bank or account;
    * otherwise the same canonical form is used. Extension is always .csv.
@@ -271,6 +315,115 @@
     return name.replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
   }
 
+  // --- sql/017: any spreadsheet, every row (Investments & Assets column map) -------------
+  // Date-formatted cells (built-in formats 14-22, 45-47 or a custom format with d/m/y and
+  // no hour-only code) become YYYY-MM-DD; other cells keep the stored value.
+  const BUILTIN_DATE_FORMATS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
+
+  function dateStyleIndexes(stylesXml) {
+    const custom = new Map();
+    const fmtRe = /<numFmt\b[^>]*numFmtId="(\d+)"[^>]*formatCode="([^"]*)"/g;
+    let match;
+    while ((match = fmtRe.exec(stylesXml))) {
+      const code = decodeXml(match[2]).replace(/\[[^\]]*\]|"[^"]*"|\\./g, "").toLowerCase();
+      custom.set(Number(match[1]), /[dy]/.test(code) || /m{3,}/.test(code));
+    }
+    const dates = new Set();
+    const xfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml);
+    if (!xfs) return dates;
+    const xfRe = /<xf\b([^>]*?)(?:\/>|>)/g;
+    let index = 0;
+    while ((match = xfRe.exec(xfs[1]))) {
+      const id = Number((/numFmtId="(\d+)"/.exec(match[1]) || [])[1] || 0);
+      if (BUILTIN_DATE_FORMATS.has(id) || custom.get(id) === true) dates.add(index);
+      index += 1;
+    }
+    return dates;
+  }
+
+  function serialToIso(serial) {
+    const days = Math.floor(Number(serial));
+    if (!Number.isFinite(days) || days < 1) return String(serial);
+    const date = new Date(Date.UTC(1899, 11, 30) + days * 86400000);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function parseSheetRaw(xml, shared, dateStyles) {
+    const rows = [];
+    const rowRe = /<row\b[^>]*>([\s\S]*?)<\/row>|<row\b[^>]*\/>/g;
+    let rowMatch;
+    while ((rowMatch = rowRe.exec(xml))) {
+      const rowXml = rowMatch[0];
+      const rAttr = /\br="(\d+)"/.exec(rowXml);
+      const rowNum = rAttr ? Number(rAttr[1]) : rows.length + 1;
+      const cells = [];
+      const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/g;
+      let cellMatch;
+      while ((cellMatch = cellRe.exec(rowXml))) {
+        const attrs = cellMatch[1] || cellMatch[3] || "";
+        const body = cellMatch[2] || "";
+        const ref = /\br="([A-Z]+)(\d+)"/.exec(attrs);
+        const col = ref ? colLettersToIndex(ref[1]) : cells.length;
+        let value = cellValue(attrs, body, shared);
+        const style = /\bs="(\d+)"/.exec(attrs);
+        const type = (/\bt="([^"]+)"/.exec(attrs) || [])[1] || "n";
+        if (style && type === "n" && value !== "" && dateStyles.has(Number(style[1])) && /^\d+(\.\d+)?$/.test(value)) {
+          value = serialToIso(value);
+        } else if (type === "n" && /^-?\d+\.\d{10,}$/.test(value)) {
+          value = String(Number(value)); // 9064.9500000000007 -> 9064.95
+        }
+        cells[col] = value;
+      }
+      while (rows.length < rowNum - 1) rows.push([]);
+      const row = [];
+      for (let i = 0; i < cells.length; i += 1) row.push(cells[i] == null ? "" : String(cells[i]));
+      while (row.length && row[row.length - 1] === "") row.pop();
+      rows.push(row);
+    }
+    while (rows.length && rows[rows.length - 1].length === 0) rows.pop();
+    return rows;
+  }
+
+  function workbookSheets(files) {
+    const wb = files["xl/workbook.xml"] ? decodeUtf8(files["xl/workbook.xml"]) : "";
+    const rels = files["xl/_rels/workbook.xml.rels"] ? decodeUtf8(files["xl/_rels/workbook.xml.rels"]) : "";
+    const sheets = [];
+    const sheetRe = /<sheet\b([^>]*)\/?>/g;
+    let match;
+    while ((match = sheetRe.exec(wb))) {
+      const name = decodeXml((/\bname="([^"]*)"/.exec(match[1]) || [])[1] || `Sheet${sheets.length + 1}`);
+      const rid = (/\br:id="([^"]+)"/.exec(match[1]) || [])[1];
+      const target = rid ? new RegExp(`Id="${rid}"[^>]*Target="([^"]+)"`).exec(rels) : null;
+      let path = target ? target[1].replace(/^\//, "") : `worksheets/sheet${sheets.length + 1}.xml`;
+      path = path.startsWith("xl/") ? path : `xl/${path}`;
+      sheets.push({ name, path });
+    }
+    if (!sheets.length && files["xl/worksheets/sheet1.xml"]) {
+      sheets.push({ name: "Sheet1", path: "xl/worksheets/sheet1.xml" });
+    }
+    return sheets;
+  }
+
+  /**
+   * Every row of one sheet (default: the first), dates as YYYY-MM-DD.
+   * Returns { sheets: [names], sheet: name, rows: string[][], csv: string }.
+   */
+  async function strmXlsxToRows(arrayBuffer, options) {
+    const files = await unzip(arrayBuffer);
+    const sharedXml = files["xl/sharedStrings.xml"] ? decodeUtf8(files["xl/sharedStrings.xml"]) : "";
+    const shared = sharedXml ? parseSharedStrings(sharedXml) : [];
+    const styles = files["xl/styles.xml"] ? dateStyleIndexes(decodeUtf8(files["xl/styles.xml"])) : new Set();
+    const sheets = workbookSheets(files);
+    const wanted = options && options.sheet;
+    const picked = sheets.find((sheet) => sheet.name === wanted) || sheets[0];
+    if (!picked || !files[picked.path]) {
+      throw new Error("XLSX has no worksheet");
+    }
+    const rows = parseSheetRaw(decodeUtf8(files[picked.path]), shared, styles);
+    return { sheets: sheets.map((sheet) => sheet.name), sheet: picked.name, rows, csv: rowsToCsv(rows) };
+  }
+
+  global.strmXlsxToRows = strmXlsxToRows;
   global.strmXlsxToCsv = strmXlsxToCsv;
   global.strmStoredUploadFilename = strmStoredUploadFilename;
 })(typeof window !== "undefined" ? window : globalThis);
