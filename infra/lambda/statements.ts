@@ -548,12 +548,29 @@ async function dispatch016(
   if (path === "/lists" && method === "POST") {
     return call("public.create_list($1)", [text(asObject(event.body).list_name)]);
   }
+  const nestedList = path.match(/^\/lists\/([^/]+)\/nested$/);
+  if (nestedList && method === "POST") {
+    if (!ID_RE.test(nestedList[1])) {
+      return json(400, { error: "list id is not valid" });
+    }
+    return call("public.create_nested_list($1::bigint, $2)", [nestedList[1], text(asObject(event.body).list_name)]);
+  }
   const listItems = path.match(/^\/lists\/([^/]+)\/items$/);
   if (listItems && method === "POST") {
     if (!ID_RE.test(listItems[1])) {
       return json(400, { error: "list id is not valid" });
     }
-    return call("public.add_list_item($1::bigint, $2)", [listItems[1], text(asObject(event.body).item_name)]);
+    const body = asObject(event.body);
+    const parent = body.parent_item_id === null || body.parent_item_id === undefined || body.parent_item_id === ""
+      ? null
+      : String(body.parent_item_id);
+    if (parent !== null) {
+      if (!ID_RE.test(parent)) {
+        return json(400, { error: "item id is not valid" });
+      }
+      return call("public.add_list_item($1::bigint, $2, $3::bigint)", [listItems[1], text(body.item_name), parent]);
+    }
+    return call("public.add_list_item($1::bigint, $2)", [listItems[1], text(body.item_name)]);
   }
   const listRename = path.match(/^\/lists\/([^/]+)$/);
   if (listRename && method === "POST") {

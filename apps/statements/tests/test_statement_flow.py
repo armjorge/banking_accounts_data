@@ -60,6 +60,7 @@ LATER_MIGRATIONS = (
     "020_statement_home_asset_accounts.sql",
     "021_delete_account.sql",
     "024_drop_asset_only_columns.sql",
+    "026_nested_lists.sql",
 )
 OWNER_SAMPLES = Path("/home/ubuntu/.cursor/projects/workspace/uploads")
 AS_OF = date(2026, 10, 20)

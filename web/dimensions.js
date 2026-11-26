@@ -80,8 +80,20 @@ function renderDimensions(root, session) {
     return catalog.attributes && catalog.attributes.length ? catalog.attributes : DEFAULT_ATTRIBUTES;
   }
 
+  function listById(listId) {
+    return (catalog.lists || []).find((list) => list.list_id === listId) || null;
+  }
+
   function listItems(listId) {
-    return (catalog.lists || []).find((list) => list.list_id === listId)?.items || [];
+    return listById(listId)?.items || [];
+  }
+
+  function nestedChoices(listId, parentItemId) {
+    const list = listById(listId);
+    const items = listItems(listId).filter((item) => !list?.parent_list_id || item.parent_item_id);
+    if (!list?.parent_list_id) return items.filter((item) => !item.parent_item_id);
+    if (!parentItemId) return [];
+    return items.filter((item) => item.parent_item_id === parentItemId);
   }
 
   function transfersSummary() {
@@ -285,25 +297,56 @@ function renderDimensions(root, session) {
     }
   }
 
-  function attributeField(attribute, row) {
+  function attributeField(attribute, row, parentItemId) {
     const value = row[attribute.field];
     if (attribute.mode !== "list" || !attribute.list_id) {
       return `<label>${dimEsc(attribute.label)} <input name="${attribute.field}" maxlength="500" value="${dimEsc(value)}" /></label>`;
     }
     const selectedId = row[`${attribute.field}_item_id`];
-    const options = listItems(attribute.list_id)
-      .map((item) => `<option value="${dimEsc(item.item_id)}" ${item.item_id === selectedId ? "selected" : ""}>${dimEsc(item.item_name)}</option>`)
+    const choices = nestedChoices(attribute.list_id, parentItemId);
+    const visible = choices.some((item) => item.item_id === selectedId) ? selectedId : null;
+    const options = choices
+      .map((item) => `<option value="${dimEsc(item.item_id)}" ${item.item_id === visible ? "selected" : ""}>${dimEsc(item.item_name)}</option>`)
       .join("");
     const orphan = !selectedId && value ? `<option value="" selected>${dimEsc(value)} (text, not in the list)</option>` : "";
-    return `<label>${dimEsc(attribute.label)} <span class="muted">(${dimEsc(attribute.list_name || "list")})</span>
-      <select name="${attribute.field}" data-list-field>
+    const list = listById(attribute.list_id);
+    const parent = list?.parent_list_id ? listById(list.parent_list_id) : null;
+    const listLabel = parent ? `sublist of ${parent.list_name}` : (attribute.list_name || "list");
+    return `<label>${dimEsc(attribute.label)} <span class="muted">(${dimEsc(listLabel)})</span>
+      <select name="${attribute.field}" data-list-field data-nested="${list?.parent_list_id ? "1" : ""}">
         ${orphan}
-        <option value="" ${!selectedId && !value ? "selected" : ""}>— none —</option>
+        <option value="" ${!visible && !value ? "selected" : ""}>— none —</option>
         ${options}
         <option value="__new__">+ New item…</option>
       </select>
       <input name="${attribute.field}__new" maxlength="500" placeholder="New item name" hidden />
     </label>`;
+  }
+
+  function refillNestedSelects(form) {
+    const attrs = attributes();
+    attrs.forEach((attribute, index) => {
+      const list = listById(attribute.list_id);
+      if (!list?.parent_list_id || attribute.mode !== "list") return;
+      const select = form.querySelector(`[name="${attribute.field}"]`);
+      if (!select) return;
+      const previous = attrs[index - 1];
+      const previousSelect = previous ? form.querySelector(`[name="${previous.field}"]`) : null;
+      const previousRaw = previousSelect ? String(previousSelect.value || "") : "";
+      const parentItemId = previousRaw && previousRaw !== "__new__" ? Number(previousRaw) : null;
+      const current = String(select.value || "");
+      const choices = nestedChoices(attribute.list_id, parentItemId);
+      const still = choices.some((item) => String(item.item_id) === current);
+      const keepNew = current === "__new__";
+      select.innerHTML = [
+        `<option value="" ${!still && !keepNew ? "selected" : ""}>— none —</option>`,
+        ...choices.map((item) => `<option value="${dimEsc(item.item_id)}" ${String(item.item_id) === current ? "selected" : ""}>${dimEsc(item.item_name)}</option>`),
+        `<option value="__new__" ${keepNew ? "selected" : ""}>+ New item…</option>`,
+      ].join("");
+      if (!still && !keepNew) select.value = "";
+      const extra = select.parentElement.querySelector(`[name="${select.name}__new"]`);
+      if (extra) extra.hidden = select.value !== "__new__";
+    });
   }
 
   function transferEditor(kind, layer, row) {
@@ -397,7 +440,14 @@ function renderDimensions(root, session) {
       ${selected ? `
         <form class="dim-edit" data-edit>
           <p><strong>${dimEsc(selected.txn_date)}</strong> · ${dimEsc(selected.concept)}</p>
-          ${attrs.map((attribute) => attributeField(attribute, selected)).join("")}
+          ${(() => {
+            let parentItemId = null;
+            return attrs.map((attribute) => {
+              const field = attributeField(attribute, selected, parentItemId);
+              parentItemId = attribute.mode === "list" ? selected[`${attribute.field}_item_id`] || null : null;
+              return field;
+            }).join("");
+          })()}
           <button type="submit">Save</button>
         </form>
         ${transferEditor(kind, layer, selected)}` : '<p class="muted">Select one row to edit its attributes or link it as a transfer.</p>'}
@@ -423,6 +473,7 @@ function renderDimensions(root, session) {
     mount.querySelectorAll("[data-list-field]").forEach((select) => {
       const extra = select.parentElement.querySelector(`[name="${select.name}__new"]`);
       select.addEventListener("change", () => {
+        refillNestedSelects(select.closest("form"));
         extra.hidden = select.value !== "__new__";
         if (!extra.hidden) extra.focus();
       });
@@ -561,43 +612,73 @@ function renderLists(root, session) {
 
   function draw() {
     const openLists = new Set([...root.querySelectorAll("details.list-card[open]")].map((element) => element.dataset.listId));
-    const listOptions = (selected) => [
+    const listOptions = (slot, selected) => [
       `<option value="" ${selected ? "" : "selected"}>Free text</option>`,
-      ...(catalog.lists || []).map(
-        (list) => `<option value="${dimEsc(list.list_id)}" ${list.list_id === selected ? "selected" : ""}>List: ${dimEsc(list.list_name)}</option>`,
-      ),
+      ...(catalog.lists || []).flatMap((list) => {
+        if (list.parent_list_id && slot === 1) return [];
+        const parent = list.parent_list_id ? (catalog.lists || []).find((item) => item.list_id === list.parent_list_id) : null;
+        const label = parent ? `Sublist of ${parent.list_name}: ${list.list_name}` : `List: ${list.list_name}`;
+        return [`<option value="${dimEsc(list.list_id)}" ${list.list_id === selected ? "selected" : ""}>${dimEsc(label)}</option>`];
+      }),
     ].join("");
     const slots = (catalog.attributes || DEFAULT_ATTRIBUTES)
       .map((attribute) => `
         <form class="slot-form" data-slot="${attribute.slot}">
           <strong>attribute_${attribute.slot}</strong>
           <label>Label <input name="label" maxlength="60" value="${dimEsc(attribute.custom_label || "")}" placeholder="Attribute ${attribute.slot}" /></label>
-          <label>Values <select name="list_id">${listOptions(attribute.list_id)}</select></label>
+          <label>Values <select name="list_id">${listOptions(attribute.slot, attribute.list_id)}</select></label>
           <button type="submit">Save</button>
         </form>`)
       .join("");
-    const lists = (catalog.lists || [])
-      .map((list) => `
+    const subItems = (nested, parentItem) => (nested?.items || []).filter((item) => item.parent_item_id === parentItem.item_id);
+    const lists = (catalog.lists || []).filter((list) => !list.parent_list_id)
+      .map((list) => {
+        const nested = (catalog.lists || []).find((item) => item.parent_list_id === list.list_id);
+        const roots = list.items.filter((item) => !item.parent_item_id);
+        return `
         <details class="list-card" data-list-id="${dimEsc(list.list_id)}" ${openLists.has(String(list.list_id)) ? "open" : ""}>
-          <summary><strong>${dimEsc(list.list_name)}</strong> · ${list.items.length} item(s)${list.slots.length ? ` · used by ${list.slots.map((slot) => `attribute_${slot}`).join(", ")}` : ""}</summary>
+          <summary><strong>${dimEsc(list.list_name)}</strong> · ${roots.length} item(s)${nested ? ` · nested list ${dimEsc(nested.list_name)}` : ""}${list.slots.length ? ` · used by ${list.slots.map((slot) => `attribute_${slot}`).join(", ")}` : ""}</summary>
           <form class="inline" data-rename-list="${dimEsc(list.list_id)}">
             <label>Name <input name="list_name" maxlength="100" value="${dimEsc(list.list_name)}" required /></label>
             <button type="submit">Rename list</button>
           </form>
+          ${nested ? `
+            <form class="inline" data-rename-list="${dimEsc(nested.list_id)}">
+              <label>Nested list <input name="list_name" maxlength="100" value="${dimEsc(nested.list_name)}" required /></label>
+              <button type="submit">Rename nested list</button>
+            </form>` : `
+            <form class="inline" data-add-nested="${dimEsc(list.list_id)}">
+              <label>Nested list <input name="list_name" maxlength="100" required placeholder="Place" /></label>
+              <button type="submit">Add nested list</button>
+            </form>`}
           <table class="compact">
             <thead><tr><th>Item</th><th>Movements</th><th></th></tr></thead>
-            <tbody>${list.items.map((item) => `
+            <tbody>${roots.map((item) => `
               <tr>
                 <td><form class="inline" data-rename-item="${dimEsc(item.item_id)}" id="item-${dimEsc(item.item_id)}"><input name="item_name" maxlength="500" value="${dimEsc(item.item_name)}" required aria-label="Item name" /></form></td>
                 <td>${dimEsc(item.used)}</td>
                 <td><button type="submit" form="item-${dimEsc(item.item_id)}">Rename</button></td>
-              </tr>`).join("") || '<tr><td colspan="3">No items yet.</td></tr>'}</tbody>
+              </tr>
+              ${nested ? `<tr><td colspan="3">
+                <p class="muted">Sub-items of ${dimEsc(item.item_name)}</p>
+                ${subItems(nested, item).map((sub) => `
+                  <form class="inline" data-rename-item="${dimEsc(sub.item_id)}" id="item-${dimEsc(sub.item_id)}">
+                    <input name="item_name" maxlength="500" value="${dimEsc(sub.item_name)}" required aria-label="Sub-item name" />
+                    <button type="submit">Rename</button>
+                    <span class="muted">${dimEsc(sub.used)} movement(s)</span>
+                  </form>`).join("") || '<p class="muted">No sub-items yet.</p>'}
+                <form class="inline" data-add-sub="${dimEsc(nested.list_id)}" data-parent-item="${dimEsc(item.item_id)}">
+                  <label>New sub-item <input name="item_name" maxlength="500" required /></label>
+                  <button type="submit">Add</button>
+                </form>
+              </td></tr>` : ""}`).join("") || '<tr><td colspan="3">No items yet.</td></tr>'}</tbody>
           </table>
           <form class="inline" data-add-item="${dimEsc(list.list_id)}">
             <label>New item <input name="item_name" maxlength="500" required /></label>
             <button type="submit">Add</button>
           </form>
-        </details>`)
+        </details>`;
+      })
       .join("");
     root.innerHTML = `
       <p class="lede">Lists give your attributes fixed choices. Renaming an item renames it on every movement and in Google Sheets.</p>
@@ -629,6 +710,22 @@ function renderLists(root, session) {
           "/attribute-settings",
           { slot: Number(form.dataset.slot), label: String(data.get("label") || ""), list_id: listId ? Number(listId) : null },
           "Attribute saved.",
+        );
+      });
+    });
+    root.querySelectorAll("[data-add-nested]").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        act(`/lists/${form.dataset.addNested}/nested`, { list_name: String(new FormData(form).get("list_name") || "") }, "Nested list added.");
+      });
+    });
+    root.querySelectorAll("[data-add-sub]").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        act(
+          `/lists/${form.dataset.addSub}/items`,
+          { item_name: String(new FormData(form).get("item_name") || ""), parent_item_id: Number(form.dataset.parentItem) },
+          "Sub-item added.",
         );
       });
     });
