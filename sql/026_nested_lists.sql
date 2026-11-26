@@ -268,7 +268,7 @@ END
 $fn$;
 
 DROP FUNCTION IF EXISTS public.list_item_ensure(UUID, UUID, BIGINT, TEXT);
-CREATE FUNCTION public.list_item_ensure(
+CREATE OR REPLACE FUNCTION public.list_item_ensure(
     p_tenant UUID,
     p_user UUID,
     p_list_id BIGINT,
