@@ -15,13 +15,13 @@ var FIELDS = [
   'row_hash', 'table', 'layer', 'kind', 'row_id', 'account_id', 'account_number', 'bank_id', 'bank_name',
   'period_start', 'period_end', 'txn_date', 'concept', 'concept_sk', 'abonos', 'cargos', 'amount',
   'occurrence', 'file_name', 'source_profile', 'balance', 'entry_source', 'cutoff_id',
-  'attribute_1', 'attribute_2', 'attribute_3',
+  'attribute_1', 'attribute_2', 'attribute_3', 'attribute_4', 'attribute_5',
   'is_internal_transfer', 'transfer_link_hash', 'transfer_role', 'transfer_type', 'transfer_source',
   'transfer_counterpart_account'
 ];
 
 var COMMON = 'account_number,bank_name,txn_date,concept_sk,abonos,cargos';
-var ATTRIBUTES = 'attribute_1,attribute_2,attribute_3';
+var ATTRIBUTES = 'attribute_1,attribute_2,attribute_3,attribute_4,attribute_5';
 
 // tab name | kind | layer | months (closed: blank = last 12; open/future: blank = all) | columns
 // ASSET / CLOSED is the investments and assets table (sql/017); balance = account balance after

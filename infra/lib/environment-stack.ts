@@ -340,6 +340,7 @@ export class EnvironmentStack extends cdk.Stack {
       // sql/016: attribute lists and transfer links.
       ["/lists", [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST]],
       ["/lists/{listId}", [apigwv2.HttpMethod.POST]],
+      ["/lists/{listId}/nested", [apigwv2.HttpMethod.POST]],
       ["/lists/{listId}/items", [apigwv2.HttpMethod.POST]],
       ["/list-items/{itemId}", [apigwv2.HttpMethod.POST]],
       ["/attribute-settings", [apigwv2.HttpMethod.POST]],

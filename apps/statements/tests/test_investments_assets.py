@@ -427,11 +427,11 @@ def test_dimensions_lists_and_graphql_on_asset_rows(conn):
     assert summary["asset"]["total"] == 1 and summary["asset"]["layers"]["closed"]["total"] == 1
     assert summary["debit"]["total"] == 3
 
+    lst = _one(conn, "SELECT public.create_list('Categorias')")
     saved = _one(conn, "SELECT public.save_dimension_values(%s, %s::jsonb)", (row["row_hash"], '{"attribute_1": "Ahorro"}'))
     assert saved["kind"] == "asset" and saved["attribute_1"] == "Ahorro"
-    lst = _one(conn, "SELECT public.create_list('Categorias')")
     bound = _one(conn, "SELECT public.set_attribute_setting(1, 'Categoria', %s)", (lst["list_id"],))
-    assert bound["converted"] == 1
+    assert bound["converted"] == 0
     item_id = conn.execute(
         "SELECT attribute_1_item_id FROM public.master_closed_aaccandass_d WHERE row_hash = %s", (row["row_hash"],)
     ).fetchone()[0]

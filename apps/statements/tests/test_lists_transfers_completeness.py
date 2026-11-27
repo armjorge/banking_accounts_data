@@ -194,7 +194,7 @@ def test_lists_items_and_rename_propagates_to_rows_and_graphql(conn, database_ur
             json.dumps(
                 {
                     "attribute_1": {"item_id": groceries["item_id"]},
-                    "attribute_2": "free note",
+                    "attribute_5": "free note",
                 }
             ),
         ),
@@ -202,7 +202,7 @@ def test_lists_items_and_rename_propagates_to_rows_and_graphql(conn, database_ur
     assert (
         saved["attribute_1"],
         saved["attribute_1_item_id"],
-        saved["attribute_2"],
+        saved["attribute_5"],
     ) == ("Groceries", groceries["item_id"], "free note")
     stored = conn.execute(
         "SELECT attribute_1, attribute_1_item_id FROM public.debit_d WHERE row_hash = %s",
@@ -226,7 +226,8 @@ def test_lists_items_and_rename_propagates_to_rows_and_graphql(conn, database_ur
     assert items["Groceries"]["used"] == 1
     assert (
         catalog["attributes"][0]["label"] == "Category"
-        and catalog["attributes"][1]["mode"] == "text"
+        and catalog["attributes"][1]["mode"] == "list"
+        and catalog["attributes"][4]["mode"] == "text"
     )
 
     # Rename once, every reader shows the new name.
@@ -245,72 +246,54 @@ def test_lists_items_and_rename_propagates_to_rows_and_graphql(conn, database_ur
     status, payload, _ = _gql(
         database_url,
         token,
-        "{ movements(kind: DEBIT, layer: OPEN) { row_hash attribute_1 attribute_2 } }",
+        "{ movements(kind: DEBIT, layer: OPEN) { row_hash attribute_1 attribute_5 } }",
     )
     assert status == 200, payload
     by_hash = {row["row_hash"]: row for row in payload["data"]["movements"]}
     assert by_hash[hashes[0]]["attribute_1"] == "Food"
-    assert by_hash[hashes[0]]["attribute_2"] == "free note"
+    assert by_hash[hashes[0]]["attribute_5"] == "free note"
 
 
-def test_binding_a_slot_converts_text_and_unbinding_restores_it(conn):
+def test_a_label_rename_does_not_rebind_the_slot(conn):
     _user_id, tenant_id, _debit_id, hashes = _seed_lists(conn, "bind@example.com")
-    conn.execute(
-        "SELECT public.save_dimension(%s, %s, %s, %s)", (hashes[0], "Rent", "", "")
-    )
-    conn.execute(
-        "SELECT public.save_dimension(%s, %s, %s, %s)", (hashes[1], "rent ", "", "")
-    )
-    conn.execute(
-        "SELECT public.save_dimension(%s, %s, %s, %s)", (hashes[2], "Travel", "", "")
-    )
     housing = _one(conn, "SELECT public.create_list('Housing')")
-    result = _one(
-        conn, "SELECT public.set_attribute_setting(1, NULL, %s)", (housing["list_id"],)
+    result = _one(conn, "SELECT public.set_attribute_setting(1, 'Home', %s)", (housing["list_id"],))
+    assert result["converted"] == 0
+    assert result["list_id"] == housing["list_id"]
+    assert result["mode"] == "list"
+    _one(
+        conn,
+        "SELECT public.save_dimension_values(%s, %s::jsonb)",
+        (hashes[0], json.dumps({"attribute_1": "Rent"})),
     )
-    assert result["converted"] == 3
+    _one(
+        conn,
+        "SELECT public.save_dimension_values(%s, %s::jsonb)",
+        (hashes[1], json.dumps({"attribute_1": "rent "})),
+    )
     names = sorted(
         item["item_name"]
         for item in _one(conn, "SELECT public.list_catalog()")["lists"][0]["items"]
     )
-    assert names == ["Rent", "Travel"]  # "Rent" and "rent " are one item
+    assert names == ["Rent"]
     stored = conn.execute(
         "SELECT COUNT(*) FILTER (WHERE attribute_1 IS NULL AND attribute_1_item_id IS NOT NULL) "
         "FROM public.debit_d WHERE tenant_id = %s AND row_hash = ANY(%s)",
-        (tenant_id, hashes[:3]),
+        (tenant_id, hashes[:2]),
     ).fetchone()[0]
-    assert stored == 3
-    # Old clients (three texts) still work on a list slot: the text picks or creates an item.
-    conn.execute(
-        "SELECT public.save_dimension(%s, %s, %s, %s)", (hashes[3], "Utilities", "", "")
-    )
-    assert "Utilities" in {
-        item["item_name"]
-        for item in _one(conn, "SELECT public.list_catalog()")["lists"][0]["items"]
-    }
-    # A free-text slot refuses an item id.
-    item_id = _one(conn, "SELECT public.list_catalog()")["lists"][0]["items"][0][
-        "item_id"
-    ]
+    assert stored == 2
+    _one(conn, "SELECT public.set_attribute_setting(1, NULL, NULL)")
+    still = conn.execute(
+        "SELECT attribute_1_item_id IS NOT NULL FROM public.debit_d WHERE row_hash = %s",
+        (hashes[0],),
+    ).fetchone()[0]
+    assert still is True
     _expect_error(
         conn,
         "SELECT public.save_dimension_values(%s, %s::jsonb)",
-        (hashes[0], json.dumps({"attribute_2": {"item_id": item_id}})),
+        (hashes[0], json.dumps({"attribute_5": {"item_id": 1}})),
         "free text",
         "22023",
-    )
-    # Back to free text: the item names become text again.
-    _one(conn, "SELECT public.set_attribute_setting(1, NULL, NULL)")
-    texts = dict(
-        conn.execute(
-            "SELECT row_hash, attribute_1 FROM public.debit_d WHERE row_hash = ANY(%s) AND attribute_1_item_id IS NULL",
-            (hashes,),
-        ).fetchall()
-    )
-    assert (
-        texts[hashes[1]] == "Rent"
-        and texts[hashes[2]] == "Travel"
-        and texts[hashes[3]] == "Utilities"
     )
 
 

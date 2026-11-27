@@ -203,7 +203,7 @@ console.log(JSON.stringify({ fetches, sheets, alerts, toasts, docProps }));
     assert options["muteHttpExceptions"] is True
     assert json.loads(options["payload"])["query"].count("movements(") == 7
     debit_closed = out["sheets"]["master_debit_closed_f"]["values"]
-    assert debit_closed[0] == ["account_number", "bank_name", "txn_date", "concept_sk", "abonos", "cargos", "attribute_1", "attribute_2", "attribute_3"]
+    assert debit_closed[0] == ["account_number", "bank_name", "txn_date", "concept_sk", "abonos", "cargos", "attribute_1", "attribute_2", "attribute_3", "attribute_4", "attribute_5"]
     assert len(debit_closed) == 2 and debit_closed[1][2] == "2026-11-03" and debit_closed[1][4] == ""
     assert set(out["sheets"]) == {
         "master_debit_closed_f", "master_debit_open_f", "master_credit_closed_f", "master_credit_open_f",

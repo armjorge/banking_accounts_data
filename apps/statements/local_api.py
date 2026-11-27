@@ -353,8 +353,32 @@ def dispatch_016(
     body = read_body()
     if path == "/lists":
         return call("public.create_list(%s)", (text(body.get("list_name")),))
+    nested = re.fullmatch(r"/lists/([^/]+)/nested", path)
+    if nested:
+        if not ID_RE.fullmatch(nested.group(1)):
+            return 400, {"error": "list id is not valid"}
+        return call(
+            "public.create_nested_list(%s::bigint, %s)",
+            (nested.group(1), text(body.get("list_name"))),
+        )
+    items = re.fullmatch(r"/lists/([^/]+)/items", path)
+    if items:
+        if not ID_RE.fullmatch(items.group(1)):
+            return 400, {"error": "list id is not valid"}
+        parent = body.get("parent_item_id")
+        parent = None if parent in (None, "") else str(parent)
+        if parent is not None:
+            if not ID_RE.fullmatch(parent):
+                return 400, {"error": "item id is not valid"}
+            return call(
+                "public.add_list_item(%s::bigint, %s, %s::bigint)",
+                (items.group(1), text(body.get("item_name")), parent),
+            )
+        return call(
+            "public.add_list_item(%s::bigint, %s)",
+            (items.group(1), text(body.get("item_name"))),
+        )
     for pattern, sql, field in (
-        (r"/lists/([^/]+)/items", "public.add_list_item(%s::bigint, %s)", "item_name"),
         (r"/lists/([^/]+)", "public.rename_list(%s::bigint, %s)", "list_name"),
         (r"/list-items/([^/]+)", "public.rename_list_item(%s::bigint, %s)", "item_name"),
     ):
