@@ -147,57 +147,57 @@ def _bind(conn):
     return recurring, other, nested
 
 
-def test_a_nested_list_binds_only_to_the_next_slot(conn):
-    recurring, other, nested = _bind(conn)
-    _expect_error(
-        conn,
-        "SELECT public.set_attribute_setting(1, 'Kind', %s)",
-        (nested["list_id"],),
-        "Attribute 1 cannot be bound to a nested list",
-        "22023",
+def test_a_note_stays_text_and_old_rows_move_onto_the_five_roles(conn):
+    seeded = _movements(conn, "roles@example.com")
+    people = _one(conn, "SELECT public.create_list('People')")
+    ana = _one(conn, "SELECT public.add_list_item(%s, 'Ana')", (people["list_id"],))
+    before = conn.execute("SELECT COUNT(*) FROM public.list_d").fetchone()[0]
+    saved = _save(conn, seeded["debit"], {"attribute_5": "hello"})
+    assert saved["attribute_5"] == "hello"
+    assert conn.execute("SELECT COUNT(*) FROM public.list_d").fetchone()[0] == before
+    conn.execute(
+        """
+        UPDATE public.debit_d
+        SET attribute_1_item_id = %s, attribute_1 = NULL,
+            attribute_2_item_id = %s, attribute_2 = NULL,
+            attribute_3 = 'note', attribute_3_item_id = NULL,
+            attribute_5 = NULL
+        WHERE row_hash = %s
+        """,
+        (seeded["apartment"]["item_id"], ana["item_id"], seeded["debit"]),
     )
-    _expect_error(
-        conn,
-        "SELECT public.set_attribute_setting(2, 'Place', %s)",
-        (nested["list_id"],),
-        "parent list first",
-        "22023",
-    )
-    kept = _one(conn, "SELECT public.list_catalog()")
-    slot2 = next(item for item in kept["attributes"] if item["slot"] == 2)
-    assert slot2["list_id"] is None
+    conn.execute("SELECT public.migrate_five_attribute_slots()")
+    row = conn.execute(
+        """
+        SELECT attribute_1_item_id, attribute_2_item_id, attribute_3_item_id, attribute_5
+        FROM public.debit_d WHERE row_hash = %s
+        """,
+        (seeded["debit"],),
+    ).fetchone()
+    assert row == (seeded["rent"]["item_id"], seeded["apartment"]["item_id"], ana["item_id"], "note")
+    conn.execute("SELECT public.migrate_five_attribute_slots()")
+    again = conn.execute(
+        """
+        SELECT attribute_1_item_id, attribute_2_item_id, attribute_3_item_id, attribute_5
+        FROM public.debit_d WHERE row_hash = %s
+        """,
+        (seeded["debit"],),
+    ).fetchone()
+    assert again == row
 
-    _one(conn, "SELECT public.set_attribute_setting(1, 'Kind', %s)", (other["list_id"],))
-    _expect_error(
-        conn,
-        "SELECT public.set_attribute_setting(2, 'Place', %s)",
-        (nested["list_id"],),
-        "parent list first",
-        "22023",
-    )
-    _one(conn, "SELECT public.set_attribute_setting(1, 'Kind', %s)", (recurring["list_id"],))
-    saved = _one(conn, "SELECT public.set_attribute_setting(2, 'Place', %s)", (nested["list_id"],))
-    assert saved["list_id"] == nested["list_id"]
-    _expect_error(
-        conn,
-        "SELECT public.set_attribute_setting(3, 'Detail', %s)",
-        (nested["list_id"],),
-        "parent list first",
-        "22023",
-    )
-    _one(conn, "SELECT public.set_attribute_setting(2, 'Kind', %s)", (recurring["list_id"],))
-    _one(conn, "SELECT public.set_attribute_setting(3, 'Detail', %s)", (nested["list_id"],))
-    _one(conn, "SELECT public.set_attribute_setting(2, 'Kind', %s)", (other["list_id"],))
-    _expect_error(
-        conn,
-        "SELECT public.set_attribute_setting(3, 'Detail', %s)",
-        (nested["list_id"],),
-        "parent list first",
-        "22023",
-    )
+
+def test_slots_follow_list_age_and_ignore_rebinding(conn):
+    recurring, other, nested = _bind(conn)
     catalog = _one(conn, "SELECT public.list_catalog()")
-    slot3 = next(item for item in catalog["attributes"] if item["slot"] == 3)
-    assert slot3["list_id"] == nested["list_id"]
+    by_slot = {item["slot"]: item for item in catalog["attributes"]}
+    assert by_slot[1]["list_id"] == recurring["list_id"]
+    assert by_slot[2]["list_id"] == nested["list_id"]
+    assert by_slot[3]["list_id"] == other["list_id"]
+    assert by_slot[5]["mode"] == "text"
+    saved = _one(conn, "SELECT public.set_attribute_setting(2, 'Place', %s)", (other["list_id"],))
+    assert saved["list_id"] == nested["list_id"]
+    assert saved["label"] == "Place"
+    _expect_error(conn, "SELECT public.create_list('Third')", (), "At most two lists", "22023")
 
 
 def _movements(conn, email):
@@ -299,3 +299,29 @@ def test_child_item_must_belong_to_the_selected_parent(conn, kind):
     )
     assert shown["attribute_1"] == "Rent"
     assert shown["attribute_2"] == "Flat"
+
+
+def test_a_sub_item_is_not_stored_on_the_list_slot(conn):
+    seeded = _movements(conn, "inline-nested@example.com")
+    _expect_error(
+        conn,
+        "SELECT public.save_dimension_values(%s, %s::jsonb)",
+        (
+            seeded["debit"],
+            json.dumps(
+                {"attribute_1": {"item_id": seeded["rent"]["item_id"], "child_item_id": seeded["apartment"]["item_id"]}}
+            ),
+        ),
+        "sublist slot",
+        "22023",
+    )
+    saved = _save(
+        conn,
+        seeded["debit"],
+        {
+            "attribute_1": {"item_id": seeded["rent"]["item_id"]},
+            "attribute_2": {"item_id": seeded["apartment"]["item_id"]},
+        },
+    )
+    assert saved["attribute_1"] == "Rent"
+    assert saved["attribute_2"] == "Apartment"

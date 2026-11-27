@@ -38,11 +38,17 @@ function money(value) {
   return Number(value).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const DEFAULT_ATTRIBUTES = [1, 2, 3].map((slot) => ({
-  slot,
-  field: `attribute_${slot}`,
-  label: `Attribute ${slot}`,
-  mode: "text",
+const DEFAULT_ATTRIBUTES = [
+  ["List 1", "list"],
+  ["Sublist 1", "list"],
+  ["List 2", "list"],
+  ["Sublist 2", "list"],
+  ["Note", "text"],
+].map(([label, mode], index) => ({
+  slot: index + 1,
+  field: `attribute_${index + 1}`,
+  label,
+  mode,
   list_id: null,
 }));
 
@@ -88,12 +94,32 @@ function renderDimensions(root, session) {
     return listById(listId)?.items || [];
   }
 
+  function sameId(left, right) {
+    if (left === null || left === undefined || left === "" || right === null || right === undefined || right === "") {
+      return false;
+    }
+    return Number(left) === Number(right);
+  }
+
   function nestedChoices(listId, parentItemId) {
     const list = listById(listId);
     const items = listItems(listId).filter((item) => !list?.parent_list_id || item.parent_item_id);
     if (!list?.parent_list_id) return items.filter((item) => !item.parent_item_id);
     if (!parentItemId) return [];
-    return items.filter((item) => item.parent_item_id === parentItemId);
+    return items.filter((item) => sameId(item.parent_item_id, parentItemId));
+  }
+
+  function shownAttribute(row, attribute) {
+    const storedId = row[`${attribute.field}_item_id`];
+    for (const list of catalog.lists || []) {
+      const item = (list.items || []).find((entry) => sameId(entry.item_id, storedId));
+      if (!item) continue;
+      if (!item.parent_item_id) return item.item_name;
+      const parentList = (catalog.lists || []).find((entry) => sameId(entry.list_id, list.parent_list_id));
+      const parent = (parentList?.items || []).find((entry) => sameId(entry.item_id, item.parent_item_id));
+      return parent ? `${parent.item_name} · ${item.item_name}` : item.item_name;
+    }
+    return row[attribute.field];
   }
 
   function transfersSummary() {
@@ -299,14 +325,18 @@ function renderDimensions(root, session) {
 
   function attributeField(attribute, row, parentItemId) {
     const value = row[attribute.field];
-    if (attribute.mode !== "list" || !attribute.list_id) {
+    if (attribute.mode !== "list") {
       return `<label>${dimEsc(attribute.label)} <input name="${attribute.field}" maxlength="500" value="${dimEsc(value)}" /></label>`;
+    }
+    if (!attribute.list_id) {
+      const waiting = attribute.slot === 2 || attribute.slot === 4 ? "No sublist yet." : "No list yet.";
+      return `<label>${dimEsc(attribute.label)} <span class="muted">${waiting}</span></label>`;
     }
     const selectedId = row[`${attribute.field}_item_id`];
     const choices = nestedChoices(attribute.list_id, parentItemId);
-    const visible = choices.some((item) => item.item_id === selectedId) ? selectedId : null;
+    const visible = choices.some((item) => sameId(item.item_id, selectedId)) ? selectedId : null;
     const options = choices
-      .map((item) => `<option value="${dimEsc(item.item_id)}" ${item.item_id === visible ? "selected" : ""}>${dimEsc(item.item_name)}</option>`)
+      .map((item) => `<option value="${dimEsc(item.item_id)}" ${sameId(item.item_id, visible) ? "selected" : ""}>${dimEsc(item.item_name)}</option>`)
       .join("");
     const orphan = !selectedId && value ? `<option value="" selected>${dimEsc(value)} (text, not in the list)</option>` : "";
     const list = listById(attribute.list_id);
@@ -336,14 +366,15 @@ function renderDimensions(root, session) {
       const parentItemId = previousRaw && previousRaw !== "__new__" ? Number(previousRaw) : null;
       const current = String(select.value || "");
       const choices = nestedChoices(attribute.list_id, parentItemId);
-      const still = choices.some((item) => String(item.item_id) === current);
+      const still = choices.some((item) => sameId(item.item_id, current));
       const keepNew = current === "__new__";
       select.innerHTML = [
         `<option value="" ${!still && !keepNew ? "selected" : ""}>— none —</option>`,
-        ...choices.map((item) => `<option value="${dimEsc(item.item_id)}" ${String(item.item_id) === current ? "selected" : ""}>${dimEsc(item.item_name)}</option>`),
+        ...choices.map((item) => `<option value="${dimEsc(item.item_id)}" ${sameId(item.item_id, current) ? "selected" : ""}>${dimEsc(item.item_name)}</option>`),
         `<option value="__new__" ${keepNew ? "selected" : ""}>+ New item…</option>`,
       ].join("");
-      if (!still && !keepNew) select.value = "";
+      if (keepNew) select.value = "__new__";
+      else if (!still) select.value = "";
       const extra = select.parentElement.querySelector(`[name="${select.name}__new"]`);
       if (extra) extra.hidden = select.value !== "__new__";
     });
@@ -418,10 +449,9 @@ function renderDimensions(root, session) {
           <td>${dimEsc(row.bank_name)}</td>
           <td>${dimEsc(row.txn_date)}</td>
           <td>${dimEsc(row.concept)}${row.entry_source && row.entry_source !== "upload" ? ` <span class="tag">${dimEsc(row.entry_source)}</span>` : ""}</td>
-          <td class="muted">${dimEsc(row.concept_sk)}</td>
           <td class="num">${money(row.abonos)}</td>
           <td class="num">${money(row.cargos)}</td>
-          ${attrs.map((attribute) => `<td>${dimEsc(row[attribute.field])}</td>`).join("")}
+          ${attrs.map((attribute) => `<td>${dimEsc(shownAttribute(row, attribute))}</td>`).join("")}
           <td>${kind === "asset" ? `<span class="muted">${dimEsc(row.source_profile || "")}</span>` : transferBadge(row)}</td>
         </tr>`)
       .join("");
@@ -434,15 +464,15 @@ function renderDimensions(root, session) {
         <span class="muted">${current.rows.length} of ${current.total} shown</span>
       </form>
       <table class="compact">
-        <thead><tr><th></th><th>Account</th><th>Bank</th><th>Date</th><th>Concept</th><th>Key</th><th>Abonos</th><th>Cargos</th>${attrs.map((attribute) => `<th>${dimEsc(attribute.label)}</th>`).join("")}<th>${kind === "asset" ? "Source" : "Transfer"}</th></tr></thead>
-        <tbody>${body || `<tr><td colspan="${9 + attrs.length}">No movements match.</td></tr>`}</tbody>
+        <thead><tr><th></th><th>Account</th><th>Bank</th><th>Date</th><th>Concept</th><th>Abonos</th><th>Cargos</th>${attrs.map((attribute) => `<th>${dimEsc(attribute.label)}</th>`).join("")}<th>${kind === "asset" ? "Source" : "Transfer"}</th></tr></thead>
+        <tbody>${body || `<tr><td colspan="${7 + attrs.length}">No movements match.</td></tr>`}</tbody>
       </table>
       ${selected ? `
         <form class="dim-edit" data-edit>
           <p><strong>${dimEsc(selected.txn_date)}</strong> · ${dimEsc(selected.concept)}</p>
           ${(() => {
             let parentItemId = null;
-            return attrs.map((attribute) => {
+            return attrs.map((attribute, index) => {
               const field = attributeField(attribute, selected, parentItemId);
               parentItemId = attribute.mode === "list" ? selected[`${attribute.field}_item_id`] || null : null;
               return field;
@@ -485,6 +515,7 @@ function renderDimensions(root, session) {
         const form = new FormData(event.target);
         const values = {};
         for (const attribute of attrs) {
+          if (!event.target.querySelector(`[name="${attribute.field}"]`)) continue;
           const raw = String(form.get(attribute.field) || "");
           if (attribute.mode === "list" && attribute.list_id) {
             if (raw === "__new__") {
@@ -612,22 +643,13 @@ function renderLists(root, session) {
 
   function draw() {
     const openLists = new Set([...root.querySelectorAll("details.list-card[open]")].map((element) => element.dataset.listId));
-    const listOptions = (slot, selected) => [
-      `<option value="" ${selected ? "" : "selected"}>Free text</option>`,
-      ...(catalog.lists || []).flatMap((list) => {
-        if (list.parent_list_id && slot === 1) return [];
-        const parent = list.parent_list_id ? (catalog.lists || []).find((item) => item.list_id === list.parent_list_id) : null;
-        const label = parent ? `Sublist of ${parent.list_name}: ${list.list_name}` : `List: ${list.list_name}`;
-        return [`<option value="${dimEsc(list.list_id)}" ${list.list_id === selected ? "selected" : ""}>${dimEsc(label)}</option>`];
-      }),
-    ].join("");
     const slots = (catalog.attributes || DEFAULT_ATTRIBUTES)
       .map((attribute) => `
         <form class="slot-form" data-slot="${attribute.slot}">
-          <strong>attribute_${attribute.slot}</strong>
-          <label>Label <input name="label" maxlength="60" value="${dimEsc(attribute.custom_label || "")}" placeholder="Attribute ${attribute.slot}" /></label>
-          <label>Values <select name="list_id">${listOptions(attribute.slot, attribute.list_id)}</select></label>
-          <button type="submit">Save</button>
+          <strong>${dimEsc(attribute.label)}</strong>
+          <span class="muted">${attribute.mode === "text" ? "Free text" : (attribute.list_name || "Assigned from your lists")}</span>
+          <label>Label <input name="label" maxlength="60" value="${dimEsc(attribute.custom_label || "")}" placeholder="${dimEsc(attribute.label)}" /></label>
+          <button type="submit">Rename</button>
         </form>`)
       .join("");
     const subItems = (nested, parentItem) => (nested?.items || []).filter((item) => item.parent_item_id === parentItem.item_id);
@@ -705,11 +727,10 @@ function renderLists(root, session) {
       form.addEventListener("submit", (event) => {
         event.preventDefault();
         const data = new FormData(form);
-        const listId = String(data.get("list_id") || "");
         act(
           "/attribute-settings",
-          { slot: Number(form.dataset.slot), label: String(data.get("label") || ""), list_id: listId ? Number(listId) : null },
-          "Attribute saved.",
+          { slot: Number(form.dataset.slot), label: String(data.get("label") || ""), list_id: null },
+          "Label saved.",
         );
       });
     });

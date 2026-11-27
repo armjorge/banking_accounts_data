@@ -72,6 +72,8 @@ type Movement {
   attribute_1: String
   attribute_2: String
   attribute_3: String
+  attribute_4: String
+  attribute_5: String
   is_internal_transfer: Boolean!
   transfer_link_hash: String
   transfer_role: String

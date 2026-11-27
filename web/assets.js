@@ -188,7 +188,7 @@ function renderAssets(root, session) {
           <td class="num">${Number(row.cargos) ? money(row.cargos) : ""}</td>
           <td class="num">${money(row.balance)}</td>
           <td><span class="tag${row.entry_source === "adjustment" ? " warn" : ""}">${dimEsc(row.entry_source)}</span>${row.file_name ? ` <span class="muted">${dimEsc(row.file_name)}</span>` : ""}</td>
-          <td>${[row.attribute_1, row.attribute_2, row.attribute_3].filter(Boolean).map(dimEsc).join(" · ")}</td>
+          <td>${[row.attribute_1, row.attribute_2, row.attribute_3, row.attribute_4, row.attribute_5].filter(Boolean).map(dimEsc).join(" · ")}</td>
           <td>${row.entry_source === "upload" ? "" : `<button type="button" data-delete-row="${dimEsc(row.row_hash)}">Delete</button>`}</td>
         </tr>`)
       .join("");
